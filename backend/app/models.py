@@ -23,6 +23,7 @@ class User(Base):
     __table_args__ = {"schema": SCHEMA}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    clerk_id: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True, index=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     virtual_balance: Mapped[float] = mapped_column(
         Numeric(15, 2), nullable=False, default=100000.00

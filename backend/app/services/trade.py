@@ -14,7 +14,7 @@ def round_money(value: float | Decimal) -> Decimal:
     return Decimal(str(value)).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
-async def execute_buy(db: AsyncSession, ticker: str, quantity: int) -> dict:
+async def execute_buy(db: AsyncSession, ticker: str, quantity: int, user_id: int) -> dict:
     # 1. Fetch price
     try:
         raw_price = await get_price(ticker)
@@ -26,7 +26,7 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int) -> dict:
 
     async with db.begin():
         # 2. Load user
-        result = await db.execute(select(User).where(User.id == 1))
+        result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one()
 
         balance = round_money(user.virtual_balance)
@@ -41,7 +41,7 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int) -> dict:
         # 5. Upsert portfolio
         port_result = await db.execute(
             select(Portfolio).where(
-                Portfolio.user_id == 1,
+                Portfolio.user_id == user_id,
                 Portfolio.ticker_symbol == ticker,
             )
         )
@@ -49,7 +49,7 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int) -> dict:
 
         if holding is None:
             holding = Portfolio(
-                user_id=1,
+                user_id=user_id,
                 ticker_symbol=ticker,
                 total_quantity=quantity,
                 avg_buy_price=price,
@@ -66,7 +66,7 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int) -> dict:
 
         # 6. Record order
         order = Order(
-            user_id=1,
+            user_id=user_id,
             ticker_symbol=ticker,
             order_side=OrderSide.BUY,
             quantity=quantity,
@@ -76,7 +76,7 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int) -> dict:
         )
         db.add(order)
 
-    logger.info(f"BUY {quantity} {ticker} @ ₹{price} | new balance ₹{user.virtual_balance}")
+    logger.info(f"BUY {quantity} {ticker} @ ₹{price} | user_id={user_id} | new balance ₹{user.virtual_balance}")
 
     return {
         "order_id": order.id,
@@ -88,12 +88,12 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int) -> dict:
     }
 
 
-async def execute_sell(db: AsyncSession, ticker: str, quantity: int) -> dict:
+async def execute_sell(db: AsyncSession, ticker: str, quantity: int, user_id: int) -> dict:
     # 1. Check holdings first (before hitting market data)
     async with db.begin():
         port_result = await db.execute(
             select(Portfolio).where(
-                Portfolio.user_id == 1,
+                Portfolio.user_id == user_id,
                 Portfolio.ticker_symbol == ticker,
             )
         )
@@ -119,7 +119,7 @@ async def execute_sell(db: AsyncSession, ticker: str, quantity: int) -> dict:
         realized_pnl = round_money((price - avg_buy) * quantity)
 
         # 3. Load user and credit balance
-        result = await db.execute(select(User).where(User.id == 1))
+        result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one()
         user.virtual_balance = round_money(user.virtual_balance) + proceeds
 
@@ -131,7 +131,7 @@ async def execute_sell(db: AsyncSession, ticker: str, quantity: int) -> dict:
 
         # 5. Record order
         order = Order(
-            user_id=1,
+            user_id=user_id,
             ticker_symbol=ticker,
             order_side=OrderSide.SELL,
             quantity=quantity,
@@ -142,7 +142,7 @@ async def execute_sell(db: AsyncSession, ticker: str, quantity: int) -> dict:
         db.add(order)
 
     logger.info(
-        f"SELL {quantity} {ticker} @ ₹{price} | P&L ₹{realized_pnl} | new balance ₹{user.virtual_balance}"
+        f"SELL {quantity} {ticker} @ ₹{price} | P&L ₹{realized_pnl} | user_id={user_id} | new balance ₹{user.virtual_balance}"
     )
 
     return {

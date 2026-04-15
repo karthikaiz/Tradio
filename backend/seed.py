@@ -38,6 +38,7 @@ async def seed():
         async with session.begin():
             user = User(
                 id=1,
+                clerk_id=None,
                 username="testuser",
                 virtual_balance=Decimal("100000.00"),
             )

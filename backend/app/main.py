@@ -4,9 +4,19 @@ from app.routers import market, trade, portfolio, orders
 
 app = FastAPI(title="Tradio API", version="1.0.0")
 
+import os
+
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+]
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    ALLOWED_ORIGINS.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

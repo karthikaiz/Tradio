@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # In-memory cache: {ticker: (price, fetched_at)}
 _cache: dict[str, tuple[float, datetime]] = {}
-CACHE_TTL_SECONDS = 60
+CACHE_TTL_SECONDS = 3
 
 
 class MarketDataError(Exception):

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
+from app.auth import get_current_user_id
 from app.models import Order
 
 router = APIRouter(prefix="/api", tags=["orders"])
@@ -14,10 +15,11 @@ async def get_orders(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
 ):
     result = await db.execute(
         select(Order)
-        .where(Order.user_id == 1)
+        .where(Order.user_id == user_id)
         .order_by(Order.timestamp.desc())
         .limit(limit)
         .offset(offset)

@@ -10,3 +10,4 @@ pytest-mock
 pytest-html
 python-dotenv
 aiosqlite
+python-jose[cryptography]

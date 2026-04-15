@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { TradingProvider } from "@/lib/trading-context";
 
@@ -24,13 +25,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-gray-950 text-gray-100">
-        <TradingProvider>{children}</TradingProvider>
-      </body>
-    </html>
+    <ClerkProvider afterSignOutUrl="/">
+      <html
+        lang="en"
+        data-scroll-behavior="smooth"
+        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      >
+        <body className="min-h-full flex flex-col" style={{ background: "var(--bg)", color: "var(--text)" }}>
+          <TradingProvider>{children}</TradingProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

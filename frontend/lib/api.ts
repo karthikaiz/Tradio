@@ -15,9 +15,13 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit, token?: string): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
 
@@ -31,11 +35,43 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface SearchResult {
+  ticker: string;
+  name: string;
+  exchange: string;
+}
+
 export interface MarketPrice {
   ticker: string;
   price: number;
   cached: boolean;
   as_of: string;
+}
+
+export interface PriceEntry {
+  price: number | null;
+  as_of: string | null;
+  error: string | null;
+}
+
+export interface MultiPriceResponse {
+  prices: Record<string, PriceEntry>;
+}
+
+export interface Candle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface HistoryResponse {
+  ticker: string;
+  period: string;
+  interval: string;
+  candles: Candle[];
 }
 
 export interface Holding {
@@ -82,26 +118,63 @@ export interface OrderRecord {
   timestamp: string;
 }
 
+export interface CategoryStock {
+  ticker: string;
+  name: string;
+  price: number;
+  change: number;
+  change_pct: number;
+  volume: number;
+}
+
+export interface MarketCategories {
+  gainers: CategoryStock[];
+  losers: CategoryStock[];
+  active: CategoryStock[];
+  stable: CategoryStock[];
+}
+
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 export const api = {
-  getPrice: (ticker: string) =>
-    request<MarketPrice>(`/api/market/price?ticker=${encodeURIComponent(ticker)}`),
+  // Public endpoints
+  getPrice: (ticker: string, signal?: AbortSignal) =>
+    request<MarketPrice>(`/api/market/price?ticker=${encodeURIComponent(ticker)}`, { signal }),
 
-  buy: (ticker: string, quantity: number) =>
+  getMultiPrice: (tickers: string[], signal?: AbortSignal) =>
+    request<MultiPriceResponse>(
+      `/api/market/multi-price?tickers=${encodeURIComponent(tickers.join(","))}`,
+      { signal }
+    ),
+
+  getHistory: (ticker: string, period = "1d", signal?: AbortSignal) =>
+    request<HistoryResponse>(
+      `/api/market/history?ticker=${encodeURIComponent(ticker)}&period=${period}`,
+      { signal }
+    ),
+
+  searchTickers: (q: string, signal?: AbortSignal) =>
+    request<{ results: SearchResult[] }>(`/api/market/search?q=${encodeURIComponent(q)}`, { signal }),
+
+  getCategories: (signal?: AbortSignal) =>
+    request<MarketCategories>("/api/market/categories", { signal }),
+
+  // Auth-required endpoints
+  buy: (ticker: string, quantity: number, token: string) =>
     request<TradeResult>("/api/trade/buy", {
       method: "POST",
       body: JSON.stringify({ ticker, quantity }),
-    }),
+    }, token),
 
-  sell: (ticker: string, quantity: number) =>
+  sell: (ticker: string, quantity: number, token: string) =>
     request<TradeResult>("/api/trade/sell", {
       method: "POST",
       body: JSON.stringify({ ticker, quantity }),
-    }),
+    }, token),
 
-  getPortfolio: () => request<Portfolio>("/api/portfolio"),
+  getPortfolio: (token: string) =>
+    request<Portfolio>("/api/portfolio", undefined, token),
 
-  getOrders: (limit = 50, offset = 0) =>
-    request<OrderRecord[]>(`/api/orders?limit=${limit}&offset=${offset}`),
+  getOrders: (token: string, limit = 50, offset = 0) =>
+    request<OrderRecord[]>(`/api/orders?limit=${limit}&offset=${offset}`, undefined, token),
 };

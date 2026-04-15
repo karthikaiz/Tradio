@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
+from app.auth import get_current_user_id
 from app.services.market import MarketDataError
 from app.services.trade import (
     execute_buy,
@@ -22,10 +23,14 @@ class TradeRequest(BaseModel):
 
 
 @router.post("/buy")
-async def buy(req: TradeRequest, db: AsyncSession = Depends(get_db)):
+async def buy(
+    req: TradeRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
     ticker = req.ticker.upper().strip()
     try:
-        result = await execute_buy(db, ticker, req.quantity)
+        result = await execute_buy(db, ticker, req.quantity, user_id)
         return result
     except MarketDataError as e:
         raise HTTPException(
@@ -44,10 +49,14 @@ async def buy(req: TradeRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/sell")
-async def sell(req: TradeRequest, db: AsyncSession = Depends(get_db)):
+async def sell(
+    req: TradeRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
     ticker = req.ticker.upper().strip()
     try:
-        result = await execute_sell(db, ticker, req.quantity)
+        result = await execute_sell(db, ticker, req.quantity, user_id)
         return result
     except MarketDataError as e:
         raise HTTPException(

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
+from app.auth import get_current_user_id
 from app.models import User, Portfolio, Order, OrderSide
 from app.services.market import get_price, MarketDataError
 from app.services.trade import round_money
@@ -13,13 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/portfolio")
-async def get_portfolio(db: AsyncSession = Depends(get_db)):
+async def get_portfolio(
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
     # Load user
-    result = await db.execute(select(User).where(User.id == 1))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one()
 
     # Load all holdings
-    port_result = await db.execute(select(Portfolio).where(Portfolio.user_id == 1))
+    port_result = await db.execute(select(Portfolio).where(Portfolio.user_id == user_id))
     holdings = port_result.scalars().all()
 
     # Fetch all prices in parallel
@@ -70,7 +74,7 @@ async def get_portfolio(db: AsyncSession = Depends(get_db)):
     # Total realized P&L from all SELL orders
     pnl_result = await db.execute(
         select(func.sum(Order.realized_pnl)).where(
-            Order.user_id == 1,
+            Order.user_id == user_id,
             Order.order_side == OrderSide.SELL,
             Order.realized_pnl.isnot(None),
         )
