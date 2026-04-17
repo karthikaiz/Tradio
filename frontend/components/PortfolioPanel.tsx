@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useTrading } from "@/lib/trading-context";
 import { api, OrderRecord } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import { getTickerName } from "@/lib/ticker-names";
 import { motion, AnimatePresence } from "framer-motion";
 import GlassCard from "./ui/GlassCard";
 import AnimatedNumber from "./ui/AnimatedNumber";
@@ -200,8 +201,13 @@ export default function PortfolioPanel() {
                         onClick={() => router.push(`/stock/${h.ticker}`)}
                         whileHover={{ backgroundColor: "rgba(255,255,255,0.03)" } as never}
                       >
-                        <td className="py-2.5 px-4 font-bold text-sm tracking-wide" style={{ color: "var(--text)" }}>
-                          {h.ticker}
+                        <td className="py-2.5 px-4">
+                          <div className="font-bold text-sm" style={{ color: "var(--text)" }}>
+                            {getTickerName(h.ticker) ?? h.ticker}
+                          </div>
+                          <div className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>
+                            {getTickerName(h.ticker) ? h.ticker : ""}
+                          </div>
                         </td>
                         <td className="py-2.5 px-4 text-right tabular text-sm" style={{ color: "var(--text)" }}>{h.quantity}</td>
                         <td className="py-2.5 px-4 text-right tabular text-sm" style={{ color: "var(--muted)" }}>
@@ -284,8 +290,15 @@ export default function PortfolioPanel() {
                             hour: "2-digit", minute: "2-digit",
                           })}
                         </td>
-                        <td className="py-2.5 px-4 font-bold text-sm tracking-wide" style={{ color: "var(--text)" }}>
-                          {o.ticker}
+                        <td className="py-2.5 px-4">
+                          <div className="font-bold text-sm" style={{ color: "var(--text)" }}>
+                            {getTickerName(o.ticker) ?? o.ticker}
+                          </div>
+                          {getTickerName(o.ticker) && (
+                            <div className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>
+                              {o.ticker}
+                            </div>
+                          )}
                         </td>
                         <td className="py-2.5 px-4">
                           <span

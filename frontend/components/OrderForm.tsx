@@ -50,7 +50,7 @@ export default function OrderForm() {
   const addToast = (message: string, type: "success" | "error") => {
     const id = ++toastId;
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
   };
 
   const handleSubmit = async () => {
@@ -70,14 +70,14 @@ export default function OrderForm() {
         addToast(`Sold ${qtyInt} ${ticker} @ ${formatINR(result.execution_price)}${pnlStr}`, "success");
       }
       setQty("");
-      await refreshPortfolio();
+      setSubmitting(false);       // reset button immediately
+      refreshPortfolio();         // refresh portfolio in background, don't await
     } catch (e) {
       if (e instanceof ApiError) {
         addToast(e.message, "error");
       } else {
         addToast("Order failed", "error");
       }
-    } finally {
       setSubmitting(false);
     }
   };
@@ -91,7 +91,7 @@ export default function OrderForm() {
       style={{ background: "var(--surface)" }}
     >
       {/* Toasts */}
-      <div className="fixed bottom-6 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      <div className="fixed bottom-24 right-4 z-50 flex flex-col gap-2 pointer-events-none" style={{ maxWidth: "calc(100vw - 2rem)" }}>
         <AnimatePresence>
           {toasts.map((t) => (
             <motion.div
@@ -102,7 +102,7 @@ export default function OrderForm() {
               transition={{ type: "spring", stiffness: 400, damping: 30 }}
               className="px-4 py-3 rounded-xl text-sm font-medium pointer-events-auto flex items-start gap-3"
               style={{
-                background: "rgba(7,11,20,0.95)",
+                background: "var(--overlay)",
                 backdropFilter: "blur(20px)",
                 border: `1px solid ${t.type === "success" ? "rgba(0,229,160,0.3)" : "rgba(255,77,109,0.3)"}`,
                 borderLeft: `3px solid ${t.type === "success" ? "var(--up)" : "var(--down)"}`,

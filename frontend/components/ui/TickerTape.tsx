@@ -76,8 +76,7 @@ export default function TickerTape() {
     <div
       className="w-full overflow-hidden border-b"
       style={{
-        background: "rgba(0,0,0,0.4)",
-        backdropFilter: "blur(8px)",
+        background: "var(--surface-2)",
         borderColor: "var(--border)",
         height: "32px",
         position: "relative",

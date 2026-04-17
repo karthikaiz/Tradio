@@ -9,6 +9,8 @@ import os
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://192.168.1.8:3000",
+    "http://100.109.108.72:3000",
 ]
 frontend_url = os.getenv("FRONTEND_URL")
 if frontend_url:

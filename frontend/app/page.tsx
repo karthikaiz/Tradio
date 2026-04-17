@@ -35,89 +35,85 @@ export default function LandingPage() {
       <Navbar />
 
       {/* Hero section */}
-      <section className="relative flex flex-col items-center justify-center py-24 px-4 text-center overflow-hidden">
-        {/* Gradient mesh background */}
+      <section className="relative flex flex-col items-center justify-center py-28 px-4 text-center overflow-hidden">
+        {/* Subtle top-center glow only */}
         <div
-          className="absolute inset-0 pointer-events-none"
+          className="absolute top-0 left-1/2 -translate-x-1/2 pointer-events-none"
           style={{
-            background: `
-              radial-gradient(ellipse 80% 50% at 20% 40%, rgba(91,139,255,0.07) 0%, transparent 60%),
-              radial-gradient(ellipse 60% 40% at 80% 60%, rgba(0,229,160,0.05) 0%, transparent 60%)
-            `,
+            width: "600px",
+            height: "300px",
+            background: "radial-gradient(ellipse at top, rgba(212,168,67,0.06) 0%, transparent 70%)",
           }}
         />
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="relative z-10 max-w-3xl mx-auto"
+          transition={{ duration: 0.5 }}
+          className="relative z-10 max-w-2xl mx-auto"
         >
           {/* Live badge */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             transition={{ duration: 0.4, delay: 0.1 }}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-8"
+            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-10"
             style={{
-              background: "rgba(0,229,160,0.08)",
-              border: "1px solid rgba(0,229,160,0.2)",
-              color: "var(--up)",
+              background: "var(--surface-2)",
+              border: "1px solid var(--border-2)",
+              color: "var(--muted)",
             }}
           >
             <LiveDot />
-            NSE Live Prices · Paper Trading
+            NSE Live · Paper Trading
           </motion.div>
 
-          {/* Headline */}
+          {/* Headline — single color, no gradient */}
           <motion.h1
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="text-5xl sm:text-7xl font-black mb-6 leading-none tracking-tight"
+            transition={{ duration: 0.5, delay: 0.15 }}
+            className="text-5xl sm:text-6xl font-black mb-5 leading-tight tracking-tight"
             style={{ color: "var(--text)" }}
           >
-            Practice Trading.
+            Trade Indian Stocks.
             <br />
-            <span className="gradient-text hue-animate">Learn the Markets.</span>
+            Zero Real Money.
           </motion.h1>
 
           {/* Subtitle */}
           <motion.p
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-            className="text-lg sm:text-xl mb-10 leading-relaxed"
+            transition={{ duration: 0.5, delay: 0.25 }}
+            className="text-base sm:text-lg mb-10 leading-relaxed"
             style={{ color: "var(--muted)" }}
           >
-            Get{" "}
-            <span className="font-bold" style={{ color: "var(--text)" }}>
+            Start with{" "}
+            <span className="font-semibold" style={{ color: "var(--text)" }}>
               ₹1,00,000
             </span>{" "}
-            virtual money to trade real NSE stocks with live prices.
-            <br className="hidden sm:block" />
-            Zero risk. Real experience.
+            virtual balance. Live NSE prices, real charts, real P&L — no risk.
           </motion.p>
 
           {/* CTAs */}
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.4 }}
+            transition={{ duration: 0.5, delay: 0.35 }}
             className="flex flex-col sm:flex-row gap-3 justify-center"
           >
             <motion.div
-              whileHover={{ scale: 1.04 }}
+              whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
               transition={{ type: "spring", stiffness: 400, damping: 20 }}
             >
               <Link
                 href="/sign-up"
-                className="inline-block px-8 py-3.5 rounded-xl font-bold text-sm shimmer-btn"
+                className="inline-block px-8 py-3 rounded-lg font-semibold text-sm shimmer-btn"
                 style={{
                   background: "var(--accent)",
-                  color: "#fff",
-                  boxShadow: "0 0 30px var(--accent-glow), 0 4px 15px rgba(0,0,0,0.3)",
+                  color: "var(--accent-text)",
                 }}
               >
                 Start Trading Free →
@@ -130,11 +126,10 @@ export default function LandingPage() {
             >
               <Link
                 href="/sign-in"
-                className="inline-block px-8 py-3.5 rounded-xl font-semibold text-sm"
+                className="inline-block px-8 py-3 rounded-lg font-medium text-sm"
                 style={{
-                  background: "var(--surface-2)",
-                  border: "1px solid var(--border)",
-                  color: "var(--text)",
+                  border: "1px solid var(--border-2)",
+                  color: "var(--muted)",
                 }}
               >
                 Sign In
@@ -205,27 +200,27 @@ export default function LandingPage() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
         transition={{ duration: 0.5 }}
-        className="text-center py-16 px-4"
+        className="text-center py-16 px-4 border-t"
+        style={{ borderColor: "var(--border)" }}
       >
-        <h2 className="text-3xl font-black mb-3" style={{ color: "var(--text)" }}>
-          Ready to practice?
+        <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--text)" }}>
+          Ready to start?
         </h2>
         <p className="mb-8 text-sm" style={{ color: "var(--muted)" }}>
-          Create your free account in seconds. No credit card required.
+          Free account. No credit card. ₹1,00,000 to practice with.
         </p>
         <motion.div
-          whileHover={{ scale: 1.04 }}
+          whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.97 }}
           transition={{ type: "spring", stiffness: 400, damping: 20 }}
           className="inline-block"
         >
           <Link
             href="/sign-up"
-            className="inline-block px-10 py-4 rounded-xl font-bold text-sm shimmer-btn"
+            className="inline-block px-8 py-3 rounded-lg font-semibold text-sm shimmer-btn"
             style={{
               background: "var(--accent)",
-              color: "#fff",
-              boxShadow: "0 0 30px var(--accent-glow)",
+              color: "var(--accent-text)",
             }}
           >
             Get Started Free →

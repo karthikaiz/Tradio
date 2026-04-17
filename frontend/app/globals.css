@@ -1,19 +1,49 @@
 @import "tailwindcss";
 
+/* ── LIGHT MODE (default) ─────────────────────────────── */
 :root {
-  --bg: #070B14;
-  --surface: rgba(255, 255, 255, 0.04);
-  --surface-2: rgba(255, 255, 255, 0.08);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-2: rgba(255, 255, 255, 0.14);
-  --up: #00E5A0;
-  --down: #FF4D6D;
-  --accent: #5B8BFF;
-  --accent-glow: rgba(91, 139, 255, 0.35);
-  --text: #F0F4FF;
-  --muted: #8892A4;
-  --glass-blur: 18px;
-  --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --bg:          #F8FAFC;
+  --surface:     #FFFFFF;
+  --surface-2:   #F1F5F9;
+  --border:      #E2E8F0;
+  --border-2:    #CBD5E1;
+  --up:          #16A34A;
+  --down:        #DC2626;
+  --accent:      #2563EB;
+  --accent-glow: rgba(37, 99, 235, 0.2);
+  --accent-text: #FFFFFF;
+  --text:        #0F172A;
+  --muted:       #64748B;
+  --glass-blur:  16px;
+  --shadow:      0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.06);
+  --overlay:     rgba(248,250,252,0.92);
+  --chart-bg:    #FFFFFF;
+  --chart-grid:  #F1F5F9;
+  --chart-text:  #64748B;
+  --chart-border:#E2E8F0;
+}
+
+/* ── DARK MODE ────────────────────────────────────────── */
+.dark {
+  --bg:          #0E1013;
+  --surface:     rgba(255,255,255,0.03);
+  --surface-2:   rgba(255,255,255,0.06);
+  --border:      rgba(255,255,255,0.07);
+  --border-2:    rgba(255,255,255,0.12);
+  --up:          #2ECC8F;
+  --down:        #E8504A;
+  --accent:      #D4A843;
+  --accent-glow: rgba(212,168,67,0.25);
+  --accent-text: #0E1013;
+  --text:        #F5F5F0;
+  --muted:       #8A8F9A;
+  --glass-blur:  18px;
+  --shadow:      0 8px 32px rgba(0,0,0,0.5);
+  --overlay:     rgba(7,11,20,0.92);
+  --chart-bg:    transparent;
+  --chart-grid:  rgba(255,255,255,0.04);
+  --chart-text:  #8892A4;
+  --chart-border:rgba(255,255,255,0.06);
 }
 
 @theme inline {
@@ -23,13 +53,9 @@
   --font-mono: var(--font-geist-mono);
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
-html {
-  scroll-behavior: smooth;
-}
+html { scroll-behavior: smooth; }
 
 body {
   background: var(--bg);
@@ -39,52 +65,37 @@ body {
   -webkit-font-smoothing: antialiased;
   position: relative;
   overflow-x: hidden;
+  transition: background 0.25s ease, color 0.15s ease;
 }
 
-/* SVG noise texture — film grain effect */
-body::before {
+/* Dark-only: film grain noise + ambient glow */
+.dark body::before {
   content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
   opacity: 0.03;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 200px 200px;
+  background-repeat: repeat; background-size: 200px 200px;
 }
-
-/* Ambient radial glow behind the page */
-body::after {
+.dark body::after {
   content: "";
-  position: fixed;
-  top: -20%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 800px;
-  height: 500px;
-  border-radius: 50%;
-  background: radial-gradient(ellipse at center, rgba(91, 139, 255, 0.06) 0%, transparent 70%);
-  pointer-events: none;
-  z-index: 0;
+  position: fixed; top: -20%; left: 50%; transform: translateX(-50%);
+  width: 800px; height: 500px; border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(212,168,67,0.04) 0%, transparent 70%);
+  pointer-events: none; z-index: 0;
 }
 
-/* Ensure content sits above pseudo-elements */
 #__next, main, header, footer, section, .z-content {
-  position: relative;
-  z-index: 1;
+  position: relative; z-index: 1;
 }
 
-/* tabular numbers for price columns */
 .tabular { font-variant-numeric: tabular-nums; }
 
-/* scrollbar */
+/* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
-/* live pulse dot — outer ring */
+/* Live pulse dot */
 @keyframes pulse-ring {
   0%, 100% { transform: scale(1); opacity: 0.8; }
   50% { transform: scale(1.9); opacity: 0; }
@@ -94,49 +105,33 @@ body::after {
   50% { opacity: 0.6; }
 }
 .live-dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--up);
-  display: inline-block;
-  position: relative;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--up); display: inline-block; position: relative;
   animation: pulse-dot-inner 2s ease-in-out infinite;
 }
 .live-dot::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: var(--up);
-  animation: pulse-ring 2s ease-out infinite;
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: var(--up); animation: pulse-ring 2s ease-out infinite;
 }
 
-/* price flash animations — neon glow pulse */
-@keyframes flash-up {
-  0% { color: var(--up); text-shadow: 0 0 12px var(--up); }
-  100% { color: inherit; text-shadow: none; }
-}
-@keyframes flash-down {
-  0% { color: var(--down); text-shadow: 0 0 12px var(--down); }
-  100% { color: inherit; text-shadow: none; }
-}
-.flash-up { animation: flash-up 0.7s ease-out; }
+/* Price flash */
+@keyframes flash-up   { 0% { color: var(--up); }   100% { color: inherit; } }
+@keyframes flash-down { 0% { color: var(--down); } 100% { color: inherit; } }
+.flash-up   { animation: flash-up 0.7s ease-out; }
 .flash-down { animation: flash-down 0.7s ease-out; }
 
-/* ticker tape scroll */
+/* Ticker tape */
 @keyframes ticker-scroll {
   from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
+  to   { transform: translateX(-50%); }
 }
 .ticker-track {
   animation: ticker-scroll 50s linear infinite;
-  white-space: nowrap;
-  display: flex;
+  white-space: nowrap; display: flex;
 }
-.ticker-track:hover {
-  animation-play-state: paused;
-}
+.ticker-track:hover { animation-play-state: paused; }
 
-/* glass surface base */
+/* Glass surface */
 .glass {
   background: var(--surface);
   backdrop-filter: blur(var(--glass-blur));
@@ -144,48 +139,33 @@ body::after {
   border: 1px solid var(--border);
 }
 
-/* shimmer sweep animation for buttons */
+/* Shimmer button */
 @keyframes shimmer {
-  0% { transform: translateX(-100%) skewX(-12deg); }
+  0%   { transform: translateX(-100%) skewX(-12deg); }
   100% { transform: translateX(200%) skewX(-12deg); }
 }
-.shimmer-btn {
-  position: relative;
-  overflow: hidden;
-}
+.shimmer-btn { position: relative; overflow: hidden; }
 .shimmer-btn::after {
-  content: "";
-  position: absolute;
-  top: 0; left: 0;
-  width: 40%;
-  height: 100%;
-  background: linear-gradient(to right, transparent, rgba(255,255,255,0.12), transparent);
+  content: ""; position: absolute; top: 0; left: 0;
+  width: 40%; height: 100%;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent);
   transform: translateX(-100%) skewX(-12deg);
 }
-.shimmer-btn:hover::after {
-  animation: shimmer 0.6s ease-out forwards;
-}
+.shimmer-btn:hover::after { animation: shimmer 0.6s ease-out forwards; }
 
-/* gradient text utility */
+/* Gradient text (dark mode hero usage) */
 .gradient-text {
-  background: linear-gradient(135deg, #5B8BFF 0%, #00E5A0 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  background: linear-gradient(135deg, #D4A843 0%, #F0C060 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
+.hue-animate {}
 
-/* hue-rotate animation for hero heading */
-@keyframes hue-shift {
-  0% { filter: hue-rotate(0deg); }
-  50% { filter: hue-rotate(30deg); }
-  100% { filter: hue-rotate(0deg); }
-}
-.hue-animate {
-  animation: hue-shift 6s ease-in-out infinite;
-}
-
-/* stagger fade-up for list items (CSS fallback) */
+/* Stagger fade-up */
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Hide lightweight-charts TradingView logo */
+.tv-lightweight-charts a,
+a[href^="https://www.tradingview.com"] { display: none !important; }

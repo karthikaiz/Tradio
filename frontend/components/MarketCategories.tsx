@@ -141,11 +141,11 @@ export default function MarketCategories() {
                     >
                       <td className="py-3 px-4 text-sm" style={{ color: "var(--muted)" }}>{i + 1}</td>
                       <td className="py-3 px-4">
-                        <div className="font-bold text-sm tracking-wide" style={{ color: "var(--text)" }}>
-                          {stock.ticker}
-                        </div>
-                        <div className="text-xs truncate max-w-[140px]" style={{ color: "var(--muted)" }}>
+                        <div className="font-bold text-sm" style={{ color: "var(--text)" }}>
                           {stock.name}
+                        </div>
+                        <div className="text-xs tracking-wide uppercase" style={{ color: "var(--muted)" }}>
+                          {stock.ticker}
                         </div>
                       </td>
                       <td className="py-3 px-4 text-right font-semibold text-sm">

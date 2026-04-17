@@ -55,8 +55,10 @@ export default function StockRow({ ticker, name, price, prevPrice, error, onRemo
       whileHover={{ backgroundColor: "rgba(255,255,255,0.03)", x: 3 } as never}
     >
       <td className="py-3 px-4">
-        <div className="font-bold text-sm tracking-wide uppercase" style={{ color: "var(--text)" }}>{ticker}</div>
-        {name && <div className="text-xs truncate max-w-[140px]" style={{ color: "var(--muted)" }}>{name}</div>}
+        {name
+        ? <div className="font-bold text-sm" style={{ color: "var(--text)" }}>{name}</div>
+        : <div className="font-bold text-sm" style={{ color: "var(--text)" }}>{ticker}</div>}
+        {name && <div className="text-xs tracking-wide uppercase" style={{ color: "var(--muted)" }}>{ticker}</div>}
       </td>
       <td className="py-3 px-4 tabular text-right">
         {price !== null ? (

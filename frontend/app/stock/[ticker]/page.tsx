@@ -11,6 +11,7 @@ import OrderForm from "@/components/OrderForm";
 import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import LiveDot from "@/components/ui/LiveDot";
 import PageTransition from "@/components/ui/PageTransition";
+import { getTickerName } from "@/lib/ticker-names";
 
 interface Props {
   params: Promise<{ ticker: string }>;
@@ -71,7 +72,7 @@ export default function StockPage({ params }: Props) {
       <header
         className="flex items-center justify-between px-4 py-3 sticky top-0 z-10"
         style={{
-          background: "rgba(7,11,20,0.9)",
+          background: "var(--overlay)",
           backdropFilter: "blur(20px)",
           WebkitBackdropFilter: "blur(20px)",
           borderBottom: "1px solid var(--border)",
@@ -86,7 +87,14 @@ export default function StockPage({ params }: Props) {
             ←
           </Link>
           <span style={{ color: "var(--border)" }}>|</span>
-          <span className="font-black tracking-widest text-sm" style={{ color: "var(--text)" }}>{symbol}</span>
+          <div>
+            <div className="font-bold text-sm" style={{ color: "var(--text)" }}>
+              {getTickerName(symbol) ?? symbol}
+            </div>
+            {getTickerName(symbol) && (
+              <div className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>{symbol}</div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1.5">
           <LiveDot />
@@ -98,8 +106,7 @@ export default function StockPage({ params }: Props) {
       <div
         className="px-4 py-4"
         style={{
-          background: "rgba(7,11,20,0.6)",
-          backdropFilter: "blur(10px)",
+          background: "var(--surface)",
           borderBottom: "1px solid var(--border)",
         }}
       >
@@ -172,7 +179,7 @@ export default function StockPage({ params }: Props) {
         <div
           className="flex-1 min-h-[340px] lg:min-h-0"
           style={{
-            background: "rgba(7,11,20,0.8)",
+            background: "var(--surface)",
             borderRight: "1px solid var(--border)",
           }}
         >

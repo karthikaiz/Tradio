@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { motion } from "framer-motion";
+import { useTheme } from "next-themes";
 import {
   createChart,
   IChartApi,
@@ -28,7 +29,53 @@ const PERIODS: { label: string; value: Period }[] = [
   { label: "1Y", value: "1y" },
 ];
 
+const formatINR = (v: number) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(v);
+
+// Format a unix timestamp for the crosshair tooltip
+const fmtTooltipTime = (time: Time, period: Period): string => {
+  if (typeof time !== "number") return String(time);
+  const d = new Date(time * 1000);
+  if (period === "1d" || period === "5d") {
+    return d.toLocaleTimeString("en-IN", {
+      hour: "2-digit", minute: "2-digit",
+      timeZone: "Asia/Kolkata", hour12: true,
+    });
+  }
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric", month: "short", year: period === "1y" ? "numeric" : undefined,
+    timeZone: "Asia/Kolkata",
+  });
+};
+
+// Format a unix timestamp for the X-axis labels (IST)
+const makeAxisFormatter = (periodRef: React.MutableRefObject<Period>) =>
+  (time: number | { year: number; month: number; day: number }): string => {
+    if (typeof time !== "number") {
+      return `${time.day}/${time.month}`;
+    }
+    const d = new Date(time * 1000);
+    const p = periodRef.current;
+    if (p === "1d") {
+      return d.toLocaleTimeString("en-IN", {
+        hour: "2-digit", minute: "2-digit",
+        timeZone: "Asia/Kolkata", hour12: false,
+      });
+    }
+    if (p === "5d") {
+      return d.toLocaleDateString("en-IN", {
+        weekday: "short", day: "numeric",
+        timeZone: "Asia/Kolkata",
+      });
+    }
+    return d.toLocaleDateString("en-IN", {
+      day: "numeric", month: "short",
+      timeZone: "Asia/Kolkata",
+    });
+  };
+
 export default function ChartPanel({ ticker }: ChartPanelProps) {
+  const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,93 +83,156 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const areaSeriesRef = useRef<ISeriesApi<"Area"> | any>(null);
   const [period, setPeriod] = useState<Period>("1d");
+  const periodRef = useRef<Period>("1d");
   const [chartType, setChartType] = useState<ChartType>("line");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ohlc, setOhlc] = useState<{ o: number; h: number; l: number; c: number } | null>(null);
+  const [crosshair, setCrosshair] = useState<{ price: number; timeStr: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => { periodRef.current = period; }, [period]);
+
+  const getChartColors = () => {
+    const s = getComputedStyle(document.documentElement);
+    return {
+      chartBg:     s.getPropertyValue("--chart-bg").trim()     || "#FFFFFF",
+      chartGrid:   s.getPropertyValue("--chart-grid").trim()   || "#F1F5F9",
+      chartText:   s.getPropertyValue("--chart-text").trim()   || "#64748B",
+      chartBorder: s.getPropertyValue("--chart-border").trim() || "#E2E8F0",
+    };
+  };
 
   // Create chart once
   useEffect(() => {
     if (!containerRef.current) return;
+    const { chartBg, chartGrid, chartText, chartBorder } = getChartColors();
+    const axisFormatter = makeAxisFormatter(periodRef);
+
     const chart = createChart(containerRef.current, {
+      autoSize: true,
       layout: {
-        background: { color: "transparent" },
-        textColor: "#8892A4",
+        background: { color: chartBg === "transparent" ? "transparent" : chartBg },
+        textColor: chartText,
       },
       grid: {
-        vertLines: { color: "rgba(255,255,255,0.04)" },
-        horzLines: { color: "rgba(255,255,255,0.04)" },
+        vertLines: { color: chartGrid },
+        horzLines: { color: "transparent" },
       },
       crosshair: {
-        vertLine: { color: "rgba(91,139,255,0.5)", width: 1, style: 3 },
-        horzLine: { color: "rgba(91,139,255,0.5)", width: 1, style: 3 },
+        mode: 0, // Normal — no magnet snap, free movement
+        vertLine: {
+          color: "rgba(100,100,120,0.7)",
+          width: 1,
+          style: 0,       // solid
+          labelVisible: false,
+        },
+        horzLine: {
+          visible: false,
+          labelVisible: false,
+        },
       },
-      rightPriceScale: {
-        borderColor: "rgba(255,255,255,0.06)",
-        textColor: "#8892A4",
-      },
+      rightPriceScale: { visible: false },
+      leftPriceScale:  { visible: false },
       timeScale: {
-        borderColor: "rgba(255,255,255,0.06)",
+        borderColor: chartBorder,
         timeVisible: true,
         secondsVisible: false,
+        fixLeftEdge: true,
+        fixRightEdge: true,
+        lockVisibleTimeRangeOnResize: true,
+        tickMarkFormatter: axisFormatter,
       },
-      handleScroll: true,
-      handleScale: true,
+      localization: {
+        timeFormatter: axisFormatter,
+      },
+      handleScroll: false,
+      handleScale:  false,
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#00E5A0",
-      downColor: "#FF4D6D",
-      borderUpColor: "#00E5A0",
-      borderDownColor: "#FF4D6D",
-      wickUpColor: "#00E5A0",
-      wickDownColor: "#FF4D6D",
+      upColor:        "#00C076",
+      downColor:      "#FF3B30",
+      borderUpColor:  "#00C076",
+      borderDownColor:"#FF3B30",
+      wickUpColor:    "#00C076",
+      wickDownColor:  "#FF3B30",
     });
 
     const areaSeries = chart.addSeries(AreaSeries, {
-      lineColor: "#5B8BFF",
-      topColor: "rgba(91,139,255,0.3)",
-      bottomColor: "rgba(91,139,255,0.0)",
-      lineWidth: 2,
-      priceLineVisible: false,
+      lineColor:    "#00C076",
+      topColor:     "rgba(0,192,118,0.15)",
+      bottomColor:  "rgba(0,192,118,0.0)",
+      lineWidth:    2,
+      priceLineVisible:           false,
+      crosshairMarkerVisible:     true,
+      crosshairMarkerRadius:      5,
+      crosshairMarkerBorderColor: "#ffffff",
+      crosshairMarkerBackgroundColor: "#00C076",
     });
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
-    areaSeriesRef.current = areaSeries;
+    areaSeriesRef.current   = areaSeries;
 
-    // Default: show area, hide candle
     candleSeries.applyOptions({ visible: false });
     areaSeries.applyOptions({ visible: true });
 
-    const resizeObserver = new ResizeObserver(() => {
-      if (containerRef.current) {
-        chart.applyOptions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
+    // Crosshair move → floating label
+    chart.subscribeCrosshairMove((param) => {
+      if (!param || !param.time) {
+        setCrosshair(null);
+        return;
       }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const areaVal   = param.seriesData.get(areaSeriesRef.current)   as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const candleVal = param.seriesData.get(candleSeriesRef.current) as any;
+
+      const price: number | null =
+        (areaVal   != null && "value" in areaVal)  ? areaVal.value   :
+        (candleVal != null && "close" in candleVal) ? candleVal.close :
+        null;
+
+      if (price === null) { setCrosshair(null); return; }
+
+      setCrosshair({
+        price,
+        timeStr: fmtTooltipTime(param.time, periodRef.current),
+      });
     });
-    resizeObserver.observe(containerRef.current);
 
     return () => {
-      resizeObserver.disconnect();
       chart.remove();
-      chartRef.current = null;
+      chartRef.current        = null;
       candleSeriesRef.current = null;
-      areaSeriesRef.current = null;
+      areaSeriesRef.current   = null;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Toggle chart type visibility
+  // Update colors on theme change
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const { chartBg, chartGrid, chartText, chartBorder } = getChartColors();
+    chartRef.current.applyOptions({
+      layout: {
+        background: { color: chartBg === "transparent" ? "transparent" : chartBg },
+        textColor: chartText,
+      },
+      grid: { vertLines: { color: chartGrid }, horzLines: { color: "transparent" } },
+      timeScale: { borderColor: chartBorder },
+    });
+  }, [resolvedTheme]);
+
+  // Toggle series visibility
   useEffect(() => {
     if (!candleSeriesRef.current || !areaSeriesRef.current) return;
     candleSeriesRef.current.applyOptions({ visible: chartType === "candle" });
     areaSeriesRef.current.applyOptions({ visible: chartType === "line" });
   }, [chartType]);
 
-  // Fetch chart data when ticker or period changes
+  // Fetch data
   const fetchHistory = useCallback(async () => {
     if (!candleSeriesRef.current || !areaSeriesRef.current) return;
     if (abortRef.current) abortRef.current.abort();
@@ -135,15 +245,15 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
       if (abortRef.current.signal.aborted) return;
 
       const candles: CandlestickData[] = data.candles.map((c: Candle) => ({
-        time: c.time as Time,
-        open: c.open,
-        high: c.high,
-        low: c.low,
+        time:  c.time as Time,
+        open:  c.open,
+        high:  c.high,
+        low:   c.low,
         close: c.close,
       }));
 
       const areaData = data.candles.map((c: Candle) => ({
-        time: c.time as Time,
+        time:  c.time as Time,
         value: c.close,
       }));
 
@@ -152,7 +262,7 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
       chartRef.current?.timeScale().fitContent();
 
       if (data.candles.length > 0) {
-        const last = data.candles[data.candles.length - 1];
+        const last  = data.candles[data.candles.length - 1];
         const first = data.candles[0];
         setOhlc({
           o: first.open,
@@ -161,6 +271,7 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
           c: last.close,
         });
       }
+      setCrosshair(null);
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       setError("Failed to load chart data");
@@ -182,20 +293,36 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
         className="flex items-center justify-between px-4 py-2.5 border-b flex-wrap gap-2"
         style={{ borderColor: "var(--border)" }}
       >
-        {/* OHLC */}
-        <div className="flex gap-3 text-xs tabular" style={{ color: "var(--muted)" }}>
-          {ohlc && (
+        {/* Crosshair price+time OR OHLC */}
+        <div className="flex gap-3 text-xs tabular" style={{ color: "var(--muted)", minHeight: "20px" }}>
+          {crosshair ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex items-center gap-2"
+            >
+              <span className="text-sm font-bold" style={{ color: "var(--text)" }}>
+                {formatINR(crosshair.price)}
+              </span>
+              <span
+                className="px-1.5 py-0.5 rounded text-xs font-medium"
+                style={{ background: "var(--surface-2)", color: "var(--muted)" }}
+              >
+                {crosshair.timeStr}
+              </span>
+            </motion.div>
+          ) : ohlc ? (
             <>
               <span>O <span className="font-medium" style={{ color: "var(--text)" }}>{ohlc.o.toFixed(2)}</span></span>
               <span>H <span className="font-medium" style={{ color: "var(--up)" }}>{ohlc.h.toFixed(2)}</span></span>
               <span>L <span className="font-medium" style={{ color: "var(--down)" }}>{ohlc.l.toFixed(2)}</span></span>
               <span>C <span className="font-medium" style={{ color: "var(--text)" }}>{ohlc.c.toFixed(2)}</span></span>
             </>
-          )}
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Chart type toggle — sliding pill */}
+          {/* Chart type */}
           <div
             className="flex rounded-lg overflow-hidden relative"
             style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
@@ -220,7 +347,7 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
             ))}
           </div>
 
-          {/* Period selector — sliding pill */}
+          {/* Period */}
           <div
             className="flex rounded-lg overflow-hidden relative"
             style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
@@ -247,18 +374,19 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
         </div>
       </div>
 
-      {/* Chart container */}
+      {/* Chart */}
       <motion.div
-        className="relative flex-1 min-h-0"
+        className="relative flex-1"
+        style={{ minHeight: "260px" }}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
       >
-        <div ref={containerRef} className="w-full h-full" />
+        <div ref={containerRef} className="w-full" style={{ height: "100%", minHeight: "260px" }} />
         {loading && (
           <div
             className="absolute inset-0 flex items-center justify-center"
-            style={{ background: "rgba(7,11,20,0.6)", backdropFilter: "blur(4px)" }}
+            style={{ background: "var(--overlay)", backdropFilter: "blur(4px)" }}
           >
             <div className="flex gap-1.5">
               {[0, 1, 2].map((i) => (
