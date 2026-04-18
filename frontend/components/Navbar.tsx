@@ -193,7 +193,6 @@ function SearchBar() {
 export default function Navbar() {
   const { isSignedIn, user, signOut } = useAuth();
   const { portfolio } = useTrading();
-  const indices = useIndices();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -224,39 +223,6 @@ export default function Navbar() {
           TR
         </span>
       </Link>
-
-      {/* Indices — desktop only */}
-      <div className="hidden md:flex items-center gap-5 flex-1 min-w-0">
-        {INDICES.map((idx) => {
-          const d = indices[idx.ticker];
-          const isUp = !d || d.change >= 0;
-          return (
-            <div key={idx.ticker} className="flex items-center gap-1.5 flex-shrink-0">
-              <span
-                className="text-xs font-semibold tracking-wider"
-                style={{ color: "var(--muted)" }}
-              >
-                {idx.label}
-              </span>
-              {d ? (
-                <>
-                  <AnimatedNumber
-                    value={d.value}
-                    format={fmtIdx}
-                    className="text-xs font-semibold"
-                    style={{ color: "var(--text)" }}
-                  />
-                  <span className="text-xs font-semibold" style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
-                    {isUp ? "▲" : "▼"} {Math.abs(d.changePct).toFixed(2)}%
-                  </span>
-                </>
-              ) : (
-                <span className="text-xs" style={{ color: "var(--text-dim)" }}>—</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
 
       {/* Search — desktop only */}
       <div className="hidden md:block ml-auto mr-2">

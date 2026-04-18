@@ -8,12 +8,18 @@ export default function AuthCallback() {
   const router = useRouter();
 
   useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get("code");
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const type = params.get("type");
+
+    if (type === "recovery") {
+      router.replace(`/auth/reset-password?code=${code}`);
+      return;
+    }
 
     if (code) {
       supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
         if (error) {
-          console.error("Auth exchange error:", error.message);
           router.replace("/sign-in");
         } else {
           router.replace("/dashboard");

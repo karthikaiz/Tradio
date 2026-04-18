@@ -128,6 +128,12 @@ export default function SignInPage() {
             />
           </div>
 
+          <div style={{ textAlign: "right", marginTop: "-4px" }}>
+            <Link href="/forgot-password" style={{ fontSize: "11px", color: "var(--muted)", fontFamily: "var(--font-geist-mono)", textDecoration: "none" }}>
+              forgot password?
+            </Link>
+          </div>
+
           {error && (
             <p style={{ color: "var(--down)", fontSize: "12px", fontFamily: "var(--font-geist-mono)" }}>
               {error}
