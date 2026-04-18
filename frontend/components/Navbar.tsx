@@ -224,13 +224,9 @@ export default function Navbar() {
         </span>
       </Link>
 
-      {/* Search — desktop only */}
-      <div className="hidden md:block ml-auto mr-2">
-        <SearchBar />
-      </div>
 
       {/* Auth */}
-      <div className="flex items-center gap-2 ml-auto md:ml-0 flex-shrink-0">
+      <div className="flex items-center gap-2 ml-auto flex-shrink-0">
         {isSignedIn ? (
           <>
             {portfolio && (

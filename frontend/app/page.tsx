@@ -95,11 +95,6 @@ export default function LandingPage() {
               ₹1,00,000 virtual balance · Real NSE live prices · Full trading terminal
             </p>
 
-            {/* Search bar */}
-            <div className="w-full max-w-xl mx-auto mb-8">
-              <SearchBox placeholder="Search any NSE stock — e.g. RELIANCE, TCS, INFY" />
-            </div>
-
             <div className="flex items-center justify-center gap-3 flex-wrap">
               <Link
                 href="/sign-up"

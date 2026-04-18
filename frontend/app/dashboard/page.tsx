@@ -113,12 +113,7 @@ export default function DashboardPage() {
         {/* ── 1. Scrolling index strip ──────────────────────── */}
         <IndexStrip indices={indices} />
 
-        {/* ── 2. Search ────────────────────────────────────── */}
-        <section className="px-4 md:px-8 pt-8 pb-2 w-full max-w-5xl mx-auto">
-          <SearchBox showWatchButton placeholder="Search any NSE stock — e.g. RELIANCE, TCS, INFY" />
-        </section>
-
-        {/* ── 3. Market Overview ───────────────────────────── */}
+        {/* ── 2. Market Overview ───────────────────────────── */}
         <section className="px-4 md:px-8 py-8 w-full max-w-5xl mx-auto">
           <div
             className="text-xs font-semibold tracking-widest mb-4"
