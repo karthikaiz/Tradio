@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
 import AnimatedNumber from "./ui/AnimatedNumber";
 
 interface StockRowProps {
@@ -13,98 +12,100 @@ interface StockRowProps {
   error?: string | null;
   onRemove?: () => void;
   index?: number;
+  selected?: boolean;
 }
 
-const formatINR = (v: number) =>
-  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(v);
+const fmtPrice = (v: number) =>
+  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(v);
 
-export default function StockRow({ ticker, name, price, prevPrice, error, onRemove, index = 0 }: StockRowProps) {
+export default function StockRow({
+  ticker, name, price, prevPrice, error, onRemove, index = 0, selected = false,
+}: StockRowProps) {
   const router = useRouter();
   const [flashClass, setFlashClass] = useState("");
   const prevRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (price === null || prevRef.current === null) {
-      prevRef.current = price;
-      return;
-    }
-    if (price > prevRef.current) {
-      setFlashClass("flash-up");
-    } else if (price < prevRef.current) {
-      setFlashClass("flash-down");
-    }
+    if (price === null || prevRef.current === null) { prevRef.current = price; return; }
+    if (price > prevRef.current) setFlashClass("flash-up");
+    else if (price < prevRef.current) setFlashClass("flash-down");
     prevRef.current = price;
     const t = setTimeout(() => setFlashClass(""), 700);
     return () => clearTimeout(t);
   }, [price]);
 
-  const change = price !== null && prevPrice !== null && prevPrice !== undefined
-    ? price - prevPrice
-    : null;
+  const change = price !== null && prevPrice != null ? price - prevPrice : null;
   const changePct = change !== null && prevPrice ? (change / prevPrice) * 100 : null;
   const isUp = change === null || change >= 0;
 
   return (
-    <motion.tr
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.25, delay: index * 0.04 }}
-      className={`border-b cursor-pointer group ${flashClass}`}
-      style={{ borderColor: "var(--border)" }}
+    <tr
+      className={`cursor-pointer group border-b ${flashClass}`}
+      style={{
+        borderColor: "var(--border)",
+        background: selected ? "var(--surface-2)" : "transparent",
+        borderLeft: selected ? "2px solid var(--accent)" : "2px solid transparent",
+        height: "44px",
+        transition: "background 0.1s",
+      }}
       onClick={() => router.push(`/stock/${ticker}`)}
-      whileHover={{ backgroundColor: "rgba(255,255,255,0.03)", x: 3 } as never}
+      onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLElement).style.background = "var(--surface-2)"; }}
+      onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
     >
-      <td className="py-3 px-4">
-        {name
-        ? <div className="font-bold text-sm" style={{ color: "var(--text)" }}>{name}</div>
-        : <div className="font-bold text-sm" style={{ color: "var(--text)" }}>{ticker}</div>}
-        {name && <div className="text-xs tracking-wide uppercase" style={{ color: "var(--muted)" }}>{ticker}</div>}
+      {/* Name + ticker */}
+      <td className="px-4 py-3">
+        <div className="font-bold text-xs truncate" style={{ color: selected ? "var(--accent)" : "var(--text)", fontFamily: "var(--font-geist-mono)" }}>
+          {name ?? ticker}
+        </div>
+        {name && (
+          <div className="text-xs tracking-wider uppercase" style={{ color: "var(--text-dim)", fontFamily: "var(--font-geist-mono)" }}>
+            {ticker}
+          </div>
+        )}
       </td>
-      <td className="py-3 px-4 tabular text-right">
+
+      {/* Price */}
+      <td className="px-4 py-2 text-right">
         {price !== null ? (
           <AnimatedNumber
             value={price}
-            format={formatINR}
-            className="font-semibold text-sm"
-            style={{ color: "var(--text)" }}
+            format={fmtPrice}
+            className="text-xs font-semibold"
+            style={{ color: "var(--text)", fontFamily: "var(--font-geist-mono)" }}
           />
         ) : (
-          <span className="text-xs" style={{ color: "var(--muted)" }}>{error || "—"}</span>
+          <span className="text-xs" style={{ color: "var(--muted)" }}>{error ?? "—"}</span>
         )}
       </td>
-      <td className="py-3 px-4 tabular text-right text-sm">
-        {change !== null ? (
-          <span style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
-            {isUp ? "+" : ""}{change.toFixed(2)}
-          </span>
-        ) : <span style={{ color: "var(--muted)" }}>—</span>}
-      </td>
-      <td className="py-3 px-4 tabular text-right">
+
+      {/* CHG% */}
+      <td className="px-4 py-2 text-right">
         {changePct !== null ? (
           <span
-            className="text-xs px-2 py-0.5 rounded-full font-semibold"
-            style={{
-              color: isUp ? "var(--up)" : "var(--down)",
-              background: isUp ? "rgba(0,229,160,0.1)" : "rgba(255,77,109,0.1)",
-            }}
+            className="text-xs font-semibold tabular"
+            style={{ color: isUp ? "var(--up)" : "var(--down)", fontFamily: "var(--font-geist-mono)" }}
           >
-            {isUp ? "▲" : "▼"} {Math.abs(changePct).toFixed(2)}%
+            {isUp ? "+" : ""}{changePct.toFixed(2)}%
           </span>
-        ) : <span style={{ color: "var(--muted)" }}>—</span>}
-      </td>
-      <td className="py-3 px-4 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-        {onRemove && (
-          <motion.button
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}
-            className="text-xs px-2 py-1 rounded transition-colors"
-            style={{ color: "var(--muted)" }}
-            whileHover={{ color: "var(--down)", scale: 1.1 } as never}
-            whileTap={{ scale: 0.9 }}
-          >
-            ✕
-          </motion.button>
+        ) : (
+          <span className="text-xs" style={{ color: "var(--muted)" }}>—</span>
         )}
       </td>
-    </motion.tr>
+
+      {/* Remove */}
+      <td className="pr-3 py-2 text-right">
+        {onRemove && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            className="opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 transition-opacity"
+            style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)" }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--down)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--muted)")}
+          >
+            ✕
+          </button>
+        )}
+      </td>
+    </tr>
   );
 }

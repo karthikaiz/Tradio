@@ -93,15 +93,12 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
 
   useEffect(() => { periodRef.current = period; }, [period]);
 
-  const getChartColors = () => {
-    const s = getComputedStyle(document.documentElement);
-    return {
-      chartBg:     s.getPropertyValue("--chart-bg").trim()     || "#FFFFFF",
-      chartGrid:   s.getPropertyValue("--chart-grid").trim()   || "#F1F5F9",
-      chartText:   s.getPropertyValue("--chart-text").trim()   || "#64748B",
-      chartBorder: s.getPropertyValue("--chart-border").trim() || "#E2E8F0",
-    };
-  };
+  const getChartColors = () => ({
+    chartBg:     "#16161E",
+    chartGrid:   "rgba(255,255,255,0.04)",
+    chartText:   "#606880",
+    chartBorder: "#2A2A3A",
+  });
 
   // Create chart once
   useEffect(() => {
@@ -287,87 +284,66 @@ export default function ChartPanel({ ticker }: ChartPanelProps) {
   }, [fetchHistory]);
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "transparent" }}>
+    <div className="flex flex-col h-full" style={{ background: "var(--chart-bg)" }}>
       {/* Toolbar */}
       <div
-        className="flex items-center justify-between px-4 py-2.5 border-b flex-wrap gap-2"
+        className="flex items-center justify-between px-3 py-2 border-b flex-wrap gap-2 flex-shrink-0"
         style={{ borderColor: "var(--border)" }}
       >
         {/* Crosshair price+time OR OHLC */}
-        <div className="flex gap-3 text-xs tabular" style={{ color: "var(--muted)", minHeight: "20px" }}>
+        <div
+          className="flex gap-3 text-xs tabular"
+          style={{ color: "var(--muted)", minHeight: "18px", fontFamily: "var(--font-geist-mono)" }}
+        >
           {crosshair ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex items-center gap-2"
-            >
-              <span className="text-sm font-bold" style={{ color: "var(--text)" }}>
-                {formatINR(crosshair.price)}
-              </span>
-              <span
-                className="px-1.5 py-0.5 rounded text-xs font-medium"
-                style={{ background: "var(--surface-2)", color: "var(--muted)" }}
-              >
-                {crosshair.timeStr}
-              </span>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2">
+              <span className="font-bold" style={{ color: "var(--text)" }}>{formatINR(crosshair.price)}</span>
+              <span style={{ color: "var(--text-dim)" }}>{crosshair.timeStr}</span>
             </motion.div>
           ) : ohlc ? (
             <>
-              <span>O <span className="font-medium" style={{ color: "var(--text)" }}>{ohlc.o.toFixed(2)}</span></span>
-              <span>H <span className="font-medium" style={{ color: "var(--up)" }}>{ohlc.h.toFixed(2)}</span></span>
-              <span>L <span className="font-medium" style={{ color: "var(--down)" }}>{ohlc.l.toFixed(2)}</span></span>
-              <span>C <span className="font-medium" style={{ color: "var(--text)" }}>{ohlc.c.toFixed(2)}</span></span>
+              <span>O <span style={{ color: "var(--text)" }}>{ohlc.o.toFixed(2)}</span></span>
+              <span>H <span style={{ color: "var(--up)" }}>{ohlc.h.toFixed(2)}</span></span>
+              <span>L <span style={{ color: "var(--down)" }}>{ohlc.l.toFixed(2)}</span></span>
+              <span>C <span style={{ color: "var(--text)" }}>{ohlc.c.toFixed(2)}</span></span>
             </>
           ) : null}
         </div>
 
         <div className="flex items-center gap-2">
           {/* Chart type */}
-          <div
-            className="flex rounded-lg overflow-hidden relative"
-            style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
-          >
+          <div className="flex border" style={{ border: "1px solid var(--border-2)", borderRadius: "2px" }}>
             {(["line", "candle"] as ChartType[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setChartType(t)}
-                className="relative px-3 py-1 text-xs font-medium transition-colors capitalize z-10"
-                style={{ color: chartType === t ? "var(--text)" : "var(--muted)" }}
+                className="px-2.5 py-1 text-xs font-semibold transition-colors"
+                style={{
+                  fontFamily: "var(--font-geist-mono)",
+                  color: chartType === t ? "var(--bg)" : "var(--muted)",
+                  background: chartType === t ? "var(--accent)" : "transparent",
+                  letterSpacing: "0.04em",
+                }}
               >
-                {chartType === t && (
-                  <motion.div
-                    layoutId="chart-type-pill"
-                    className="absolute inset-0 rounded-md"
-                    style={{ background: "var(--accent)", opacity: 0.8 }}
-                    transition={{ type: "spring", stiffness: 500, damping: 35 }}
-                  />
-                )}
-                <span className="relative z-10">{t === "line" ? "Line" : "Candle"}</span>
+                {t === "line" ? "[AREA]" : "[CANDLE]"}
               </button>
             ))}
           </div>
 
           {/* Period */}
-          <div
-            className="flex rounded-lg overflow-hidden relative"
-            style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
-          >
+          <div className="flex border" style={{ border: "1px solid var(--border-2)", borderRadius: "2px" }}>
             {PERIODS.map((p) => (
               <button
                 key={p.value}
                 onClick={() => setPeriod(p.value)}
-                className="relative px-2.5 py-1 text-xs font-medium transition-colors z-10"
-                style={{ color: period === p.value ? "var(--text)" : "var(--muted)" }}
+                className="px-2 py-1 text-xs font-semibold transition-colors"
+                style={{
+                  fontFamily: "var(--font-geist-mono)",
+                  color: period === p.value ? "var(--bg)" : "var(--muted)",
+                  background: period === p.value ? "var(--accent)" : "transparent",
+                }}
               >
-                {period === p.value && (
-                  <motion.div
-                    layoutId="period-pill"
-                    className="absolute inset-0 rounded-md"
-                    style={{ background: "var(--surface-2)", border: "1px solid var(--border-2)" }}
-                    transition={{ type: "spring", stiffness: 500, damping: 35 }}
-                  />
-                )}
-                <span className="relative z-10">{p.label}</span>
+                {p.label.toLowerCase()}
               </button>
             ))}
           </div>

@@ -51,7 +51,7 @@ async def get_price(ticker: str) -> float:
             logger.debug(f"Cache hit for {ticker} (age {age:.1f}s)")
             return cached_price
 
-    ticker_ns = f"{ticker}.NS"
+    ticker_ns = ticker if ticker.startswith("^") else f"{ticker}.NS"
     logger.info(f"Fetching price for {ticker_ns} from yfinance")
 
     try:

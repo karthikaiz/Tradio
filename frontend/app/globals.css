@@ -1,49 +1,32 @@
 @import "tailwindcss";
 
-/* ── LIGHT MODE (default) ─────────────────────────────── */
+/* ── TERMINAL DARK THEME ───────────────────────────────── */
 :root {
-  --bg:          #F8FAFC;
-  --surface:     #FFFFFF;
-  --surface-2:   #F1F5F9;
-  --border:      #E2E8F0;
-  --border-2:    #CBD5E1;
-  --up:          #16A34A;
-  --down:        #DC2626;
-  --accent:      #2563EB;
-  --accent-glow: rgba(37, 99, 235, 0.2);
-  --accent-text: #FFFFFF;
-  --text:        #0F172A;
-  --muted:       #64748B;
-  --glass-blur:  16px;
-  --shadow:      0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.06);
-  --overlay:     rgba(248,250,252,0.92);
-  --chart-bg:    #FFFFFF;
-  --chart-grid:  #F1F5F9;
-  --chart-text:  #64748B;
-  --chart-border:#E2E8F0;
-}
-
-/* ── DARK MODE ────────────────────────────────────────── */
-.dark {
-  --bg:          #0E1013;
-  --surface:     rgba(255,255,255,0.03);
-  --surface-2:   rgba(255,255,255,0.06);
-  --border:      rgba(255,255,255,0.07);
-  --border-2:    rgba(255,255,255,0.12);
-  --up:          #2ECC8F;
-  --down:        #E8504A;
-  --accent:      #D4A843;
-  --accent-glow: rgba(212,168,67,0.25);
-  --accent-text: #0E1013;
-  --text:        #F5F5F0;
-  --muted:       #8A8F9A;
-  --glass-blur:  18px;
-  --shadow:      0 8px 32px rgba(0,0,0,0.5);
-  --overlay:     rgba(7,11,20,0.92);
-  --chart-bg:    transparent;
+  --bg:          #16161E;
+  --surface:     #1E1E28;
+  --surface-2:   #252530;
+  --border:      #2A2A3A;
+  --border-2:    #353548;
+  --accent:      #00E5FF;
+  --accent-dim:  rgba(0,229,255,0.12);
+  --accent-text: #0D0D14;
+  --up:          #00C087;
+  --up-dim:      rgba(0,192,135,0.12);
+  --down:        #FF4D4D;
+  --down-dim:    rgba(255,77,77,0.12);
+  --text:        #E8EDF7;
+  --muted:       #B8C0D4;
+  --text-dim:    #8890A8;
+  --overlay:     rgba(22,22,30,0.95);
+  --chart-bg:    #16161E;
   --chart-grid:  rgba(255,255,255,0.04);
-  --chart-text:  #8892A4;
-  --chart-border:rgba(255,255,255,0.06);
+  --chart-text:  #B8C0D4;
+  --chart-border:#2A2A3A;
+
+  /* Legacy compat */
+  --glass-blur:  0px;
+  --shadow:      0 2px 8px rgba(0,0,0,0.4);
+  --accent-glow: rgba(0,229,255,0.2);
 }
 
 @theme inline {
@@ -54,38 +37,16 @@
 }
 
 * { box-sizing: border-box; }
-
 html { scroll-behavior: smooth; }
 
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-feature-settings: "tnum";
   -webkit-font-smoothing: antialiased;
   position: relative;
   overflow-x: hidden;
-  transition: background 0.25s ease, color 0.15s ease;
-}
-
-/* Dark-only: film grain noise + ambient glow */
-.dark body::before {
-  content: "";
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  opacity: 0.03;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  background-repeat: repeat; background-size: 200px 200px;
-}
-.dark body::after {
-  content: "";
-  position: fixed; top: -20%; left: 50%; transform: translateX(-50%);
-  width: 800px; height: 500px; border-radius: 50%;
-  background: radial-gradient(ellipse at center, rgba(212,168,67,0.04) 0%, transparent 70%);
-  pointer-events: none; z-index: 0;
-}
-
-#__next, main, header, footer, section, .z-content {
-  position: relative; z-index: 1;
 }
 
 .tabular { font-variant-numeric: tabular-nums; }
@@ -131,15 +92,7 @@ body {
 }
 .ticker-track:hover { animation-play-state: paused; }
 
-/* Glass surface */
-.glass {
-  background: var(--surface);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--border);
-}
-
-/* Shimmer button */
+/* Shimmer button sweep */
 @keyframes shimmer {
   0%   { transform: translateX(-100%) skewX(-12deg); }
   100% { transform: translateX(200%) skewX(-12deg); }
@@ -148,22 +101,27 @@ body {
 .shimmer-btn::after {
   content: ""; position: absolute; top: 0; left: 0;
   width: 40%; height: 100%;
-  background: linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent);
+  background: linear-gradient(to right, transparent, rgba(255,255,255,0.08), transparent);
   transform: translateX(-100%) skewX(-12deg);
 }
 .shimmer-btn:hover::after { animation: shimmer 0.6s ease-out forwards; }
 
-/* Gradient text (dark mode hero usage) */
+/* Gradient text */
 .gradient-text {
-  background: linear-gradient(135deg, #D4A843 0%, #F0C060 100%);
+  background: linear-gradient(135deg, #00E5FF 0%, #00C087 100%);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
-.hue-animate {}
 
 /* Stagger fade-up */
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Terminal scanline (subtle, hero only) */
+@keyframes scan-line {
+  0%   { top: -2px; }
+  100% { top: 100%; }
 }
 
 /* Hide lightweight-charts TradingView logo */

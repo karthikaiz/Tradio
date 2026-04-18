@@ -20,7 +20,8 @@ NSE_LARGECAPS = [
 
 def _fetch_category_data_sync(ticker: str) -> dict | None:
     try:
-        info = yf.Ticker(f"{ticker}.NS").info
+        ticker_sym = ticker if ticker.startswith("^") else f"{ticker}.NS"
+        info = yf.Ticker(ticker_sym).info
         price = info.get("currentPrice") or info.get("regularMarketPrice")
         change_pct = info.get("regularMarketChangePercent")
         change = info.get("regularMarketChange")
@@ -122,7 +123,7 @@ async def get_history(
         raise HTTPException(status_code=400, detail=f"Invalid period. Use one of: {VALID_PERIODS}")
 
     interval = PERIOD_INTERVAL_MAP[period]
-    ticker_ns = f"{ticker}.NS"
+    ticker_ns = ticker if ticker.startswith("^") else f"{ticker}.NS"
     try:
         loop = asyncio.get_event_loop()
         candles = await loop.run_in_executor(None, _fetch_history_sync, ticker_ns, period, interval)

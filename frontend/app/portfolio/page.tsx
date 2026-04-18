@@ -1,27 +1,29 @@
 "use client";
 
-import { motion } from "framer-motion";
-import Navbar from "@/components/Navbar";
+import TerminalShell from "@/components/TerminalShell";
 import PortfolioPanel from "@/components/PortfolioPanel";
-import PageTransition from "@/components/ui/PageTransition";
 
 export default function PortfolioPage() {
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
-      <Navbar />
-
-      <PageTransition className="flex-1 w-full max-w-5xl mx-auto px-4 py-6">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="mb-6"
+    <TerminalShell>
+      <div className="flex flex-col md:h-[calc(100vh-92px)] md:overflow-hidden">
+        {/* Header */}
+        <div
+          className="flex items-center px-5 py-2.5 border-b flex-shrink-0"
+          style={{ borderColor: "var(--border)" }}
         >
-          <h1 className="text-2xl font-black" style={{ color: "var(--text)" }}>Portfolio</h1>
-          <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>Your holdings and order history</p>
-        </motion.div>
-        <PortfolioPanel />
-      </PageTransition>
-    </div>
+          <span
+            className="text-xs font-semibold tracking-widest"
+            style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)" }}
+          >
+            PORTFOLIO_OVERVIEW
+          </span>
+        </div>
+        {/* Content */}
+        <div className="flex-1 md:overflow-auto">
+          <PortfolioPanel />
+        </div>
+      </div>
+    </TerminalShell>
   );
 }

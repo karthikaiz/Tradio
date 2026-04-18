@@ -16,8 +16,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Tradio — Indian Market Paper Trading",
-  description: "Practice trading NSE/BSE stocks with virtual ₹1,00,000",
+  title: "Tradio — Practice Trading",
+  description: "Practice trading NSE stocks with virtual ₹1,00,000. Zero risk.",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -29,11 +33,10 @@ export default function RootLayout({
     <ClerkProvider afterSignOutUrl="/">
       <html
         lang="en"
-        data-scroll-behavior="smooth"
         suppressHydrationWarning
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased dark`}
       >
-        <body className="min-h-full flex flex-col" style={{ background: "var(--bg)", color: "var(--text)" }}>
+        <body style={{ background: "var(--bg)", color: "var(--text)" }}>
           <ThemeProvider>
             <TradingProvider>{children}</TradingProvider>
           </ThemeProvider>

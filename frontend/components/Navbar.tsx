@@ -1,343 +1,298 @@
 "use client";
 
 import Link from "next/link";
-import { useAuth, UserButton, useClerk } from "@clerk/nextjs";
-import { useTrading } from "@/lib/trading-context";
-import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useAuth, UserButton } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { api } from "@/lib/api";
+import { useTrading } from "@/lib/trading-context";
 import AnimatedNumber from "./ui/AnimatedNumber";
-import LiveDot from "./ui/LiveDot";
-import TickerTape from "./ui/TickerTape";
 
-const formatINR = (v: number) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(v);
+const fmtIdx = (v: number) =>
+  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(v);
 
-function ThemeToggleRow() {
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
-  const isDark = theme === "dark";
-  return (
-    <button
-      onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="w-full flex items-center justify-between px-4 py-3.5 text-sm font-medium transition-colors"
-      style={{ color: "var(--text)" }}
-    >
-      <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
-      <span
-        className="w-9 h-5 rounded-full relative transition-colors flex-shrink-0"
-        style={{ background: isDark ? "var(--accent)" : "var(--border-2)" }}
-      >
-        <motion.span
-          className="absolute top-0.5 w-4 h-4 rounded-full"
-          style={{ background: "#fff" }}
-          animate={{ left: isDark ? "calc(100% - 18px)" : "2px" }}
-          transition={{ type: "spring", stiffness: 500, damping: 35 }}
-        />
-      </span>
-    </button>
-  );
-}
+const fmtBal = (v: number) =>
+  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(v);
 
-function ThemeToggleBtn() {
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return <div className="w-8 h-8" />;
-  const isDark = theme === "dark";
-  return (
-    <motion.button
-      onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
-      style={{
-        background: "var(--surface-2)",
-        border: "1px solid var(--border)",
-        color: "var(--muted)",
-      }}
-      whileTap={{ scale: 0.9 }}
-      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-    >
-      {isDark ? "☀︎" : "☾"}
-    </motion.button>
-  );
-}
+interface IndexData { value: number; change: number; changePct: number }
 
-function MobileDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { isSignedIn } = useAuth();
-  const { signOut } = useClerk();
-  const { portfolio } = useTrading();
+const INDICES = [
+  { label: "NIFTY 50", ticker: "^NSEI" },
+  { label: "SENSEX",   ticker: "^BSESN" },
+  { label: "BANK NIFTY", ticker: "^NSEBANK" },
+];
 
-  // Close on back navigation / escape
+function useIndices() {
+  const [data, setData] = useState<Record<string, IndexData>>({});
+  const baselineRef = useRef<Record<string, number>>({});
+
+  const fetch = useCallback(async () => {
+    try {
+      const tickers = INDICES.map((i) => i.ticker);
+      const res = await api.getMultiPrice(tickers);
+      const updated: Record<string, IndexData> = {};
+      for (const idx of INDICES) {
+        const entry = res.prices[idx.ticker];
+        if (!entry?.price) continue;
+        if (!baselineRef.current[idx.ticker]) baselineRef.current[idx.ticker] = entry.price;
+        const baseline = baselineRef.current[idx.ticker];
+        const change = entry.price - baseline;
+        updated[idx.ticker] = { value: entry.price, change, changePct: (change / baseline) * 100 };
+      }
+      if (Object.keys(updated).length) setData((prev) => ({ ...prev, ...updated }));
+    } catch {
+      // silently ignore — indices might not be supported
+    }
+  }, []);
+
   useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", handler);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", handler);
-      document.body.style.overflow = "";
+    fetch();
+    const id = setInterval(fetch, 60000);
+    return () => clearInterval(id);
+  }, [fetch]);
+
+  return data;
+}
+
+function SearchBar() {
+  const router = useRouter();
+  const { addToWatchlist } = useTrading();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ ticker: string; name: string }[]>([]);
+  const [focused, setFocused] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (debRef.current) clearTimeout(debRef.current);
+    if (!query.trim() || query.length < 2) { setResults([]); setLoading(false); return; }
+    setLoading(true);
+    debRef.current = setTimeout(async () => {
+      if (abortRef.current) abortRef.current.abort();
+      abortRef.current = new AbortController();
+      try {
+        const { results: r } = await api.searchTickers(query, abortRef.current.signal);
+        setResults(r.slice(0, 7));
+      } catch { /* */ }
+      finally { setLoading(false); }
+    }, 300);
+  }, [query]);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setFocused(false); setResults([]); setQuery("");
+      }
     };
-  }, [open, onClose]);
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  const select = (ticker: string) => {
+    router.push(`/stock/${ticker}`);
+    setQuery(""); setResults([]); setFocused(false);
+  };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            key="backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-40"
-            style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(2px)" }}
-            onClick={onClose}
-          />
+    <div ref={wrapRef} className="relative">
+      <div
+        className="flex items-center gap-2 px-3"
+        style={{
+          height: "30px",
+          width: "200px",
+          background: "var(--bg)",
+          border: `1px solid ${focused ? "var(--accent)" : "var(--border-2)"}`,
+          borderRadius: "2px",
+          transition: "border-color 0.15s",
+        }}
+      >
+        <span
+          style={{ color: "var(--accent)", fontSize: "12px", fontFamily: "var(--font-geist-mono)", lineHeight: 1 }}
+        >›</span>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setFocused(true)}
+          placeholder="TICKER OR COMMAND"
+          className="flex-1 bg-transparent focus:outline-none"
+          style={{
+            fontSize: "11px",
+            fontFamily: "var(--font-geist-mono)",
+            color: "var(--text)",
+            letterSpacing: "0.05em",
+          }}
+        />
+        {loading && (
+          <span style={{ color: "var(--muted)", fontSize: "10px", fontFamily: "var(--font-geist-mono)" }}>...</span>
+        )}
+      </div>
 
-          {/* Drawer */}
+      <AnimatePresence>
+        {focused && results.length > 0 && (
           <motion.div
-            key="drawer"
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "spring", stiffness: 400, damping: 38 }}
-            className="fixed top-0 right-0 h-full z-50 flex flex-col"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute top-full left-0 z-50 mt-1 overflow-hidden"
             style={{
-              width: "min(300px, 82vw)",
-              background: "var(--bg)",
-              borderLeft: "1px solid var(--border)",
-              boxShadow: "-8px 0 32px rgba(0,0,0,0.25)",
+              width: "280px",
+              background: "var(--surface)",
+              border: "1px solid var(--border-2)",
+              borderRadius: "2px",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
             }}
           >
-            {/* Drawer header */}
-            <div
-              className="flex items-center justify-between px-4 py-4 border-b"
-              style={{ borderColor: "var(--border)" }}
-            >
-              <span className="font-black text-lg tracking-tight" style={{ color: "var(--text)" }}>
-                TRADIO
-              </span>
-              <motion.button
-                onClick={onClose}
-                whileTap={{ scale: 0.9 }}
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-lg"
-                style={{ background: "var(--surface-2)", color: "var(--muted)" }}
-              >
-                ✕
-              </motion.button>
-            </div>
-
-            {/* Balance chip — signed in only */}
-            {isSignedIn && portfolio && (
+            {results.map((r) => (
               <div
-                className="mx-4 mt-4 px-4 py-3 rounded-xl flex items-center justify-between"
-                style={{ background: "var(--surface-2)", border: "1px solid var(--border-2)" }}
+                key={r.ticker}
+                onMouseDown={(e) => { e.preventDefault(); select(r.ticker); }}
+                className="flex items-center justify-between px-3 py-2 cursor-pointer group"
+                style={{ borderBottom: "1px solid var(--border)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                <span className="text-xs" style={{ color: "var(--muted)" }}>Available Balance</span>
-                <AnimatedNumber
-                  value={portfolio.available_balance}
-                  format={formatINR}
-                  className="text-sm font-bold"
-                  style={{ color: "var(--text)" }}
-                />
-              </div>
-            )}
-
-            {/* Nav links */}
-            <nav className="flex-1 overflow-y-auto mt-2">
-              {isSignedIn ? (
-                <>
-                  <DrawerLink href="/dashboard" icon="▦" label="Dashboard" onClick={onClose} />
-                  <DrawerLink href="/portfolio" icon="◈" label="Portfolio" onClick={onClose} />
-                  <Divider />
-                </>
-              ) : (
-                <>
-                  <DrawerLink href="/sign-in" icon="→" label="Sign In" onClick={onClose} />
-                  <DrawerLink href="/sign-up" icon="★" label="Get Started" onClick={onClose} accent />
-                  <Divider />
-                </>
-              )}
-
-              {/* Theme toggle */}
-              <ThemeToggleRow />
-              <Divider />
-
-              {/* Secondary links */}
-              <DrawerLink href="/about" icon="ℹ" label="About" onClick={onClose} muted />
-              <DrawerLink href="/privacy" icon="⚿" label="Privacy Policy" onClick={onClose} muted />
-
-              {/* Sign out */}
-              {isSignedIn && (
-                <>
-                  <Divider />
-                  <button
-                    onClick={() => { signOut(); onClose(); }}
-                    className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-colors"
-                    style={{ color: "var(--down)" }}
+                <div className="min-w-0">
+                  <span
+                    className="font-bold text-xs"
+                    style={{ color: "var(--accent)", fontFamily: "var(--font-geist-mono)" }}
                   >
-                    <span className="w-5 text-center text-base">↪</span>
-                    Sign Out
-                  </button>
-                </>
-              )}
-            </nav>
-
-            {/* Footer */}
-            <div className="px-4 py-3 border-t" style={{ borderColor: "var(--border)" }}>
-              <p className="text-xs" style={{ color: "var(--muted)" }}>
-                Paper trading · NSE live prices
-              </p>
-            </div>
+                    {r.ticker}
+                  </span>
+                  <span className="text-xs ml-2 truncate" style={{ color: "var(--muted)" }}>{r.name}</span>
+                </div>
+                <button
+                  onMouseDown={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    addToWatchlist(r.ticker);
+                    setQuery(""); setResults([]); setFocused(false);
+                  }}
+                  className="ml-2 flex-shrink-0 text-xs px-1.5 py-0.5 transition-colors"
+                  style={{
+                    color: "var(--accent)",
+                    border: "1px solid var(--accent-dim)",
+                    borderRadius: "2px",
+                    fontFamily: "var(--font-geist-mono)",
+                  }}
+                >
+                  +WATCH
+                </button>
+              </div>
+            ))}
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
+    </div>
   );
-}
-
-function DrawerLink({
-  href, icon, label, onClick, accent, muted,
-}: {
-  href: string; icon: string; label: string; onClick: () => void; accent?: boolean; muted?: boolean;
-}) {
-  const color = accent ? "var(--accent)" : muted ? "var(--muted)" : "var(--text)";
-  return (
-    <Link
-      href={href}
-      onClick={onClick}
-      className="flex items-center gap-3 px-4 py-3.5 text-sm font-medium transition-colors"
-      style={{ color }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-    >
-      <span className="w-5 text-center text-base" style={{ color: "var(--muted)" }}>{icon}</span>
-      {label}
-    </Link>
-  );
-}
-
-function Divider() {
-  return <div className="mx-4 my-1" style={{ height: "1px", background: "var(--border)" }} />;
 }
 
 export default function Navbar() {
   const { isSignedIn } = useAuth();
   const { portfolio } = useTrading();
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const indices = useIndices();
 
   return (
-    <>
-      <div className="sticky top-0 z-30" style={{ position: "relative" }}>
-        {/* Ticker tape strip */}
-        <TickerTape />
-
-        {/* Main nav */}
-        <header
-          className="flex items-center justify-between px-4 sm:px-6 py-3"
-          style={{
-            background: "var(--overlay)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-            borderBottom: "1px solid var(--border)",
-          }}
+    <header
+      className="fixed top-0 left-0 right-0 z-50 flex items-center px-4 gap-4"
+      style={{
+        height: "56px",
+        background: "var(--surface)",
+        borderBottom: "1px solid var(--border)",
+        fontFamily: "var(--font-geist-mono)",
+      }}
+    >
+      {/* Logo */}
+      <Link href={isSignedIn ? "/dashboard" : "/"} className="flex-shrink-0 mr-2">
+        <span
+          className="font-black tracking-widest text-sm"
+          style={{ color: "var(--accent)" }}
         >
-          {/* Left: Logo */}
-          <Link
-            href={isSignedIn ? "/dashboard" : "/"}
-            className="font-black text-xl tracking-tight"
-            style={{ color: "var(--text)" }}
-          >
-            TRADIO
-          </Link>
+          TR
+        </span>
+      </Link>
 
-          {/* Center: live indicator — desktop only */}
-          <div className="hidden sm:flex items-center gap-2">
-            <LiveDot />
-            <span className="text-xs font-medium tracking-wider uppercase" style={{ color: "var(--up)" }}>
-              NSE Live
-            </span>
-          </div>
-
-          {/* Right */}
-          <div className="flex items-center gap-3">
-            {/* Desktop nav */}
-            <div className="hidden sm:flex items-center gap-3">
-              {isSignedIn ? (
+      {/* Indices — desktop only */}
+      <div className="hidden md:flex items-center gap-5 flex-1 min-w-0">
+        {INDICES.map((idx) => {
+          const d = indices[idx.ticker];
+          const isUp = !d || d.change >= 0;
+          return (
+            <div key={idx.ticker} className="flex items-center gap-1.5 flex-shrink-0">
+              <span
+                className="text-xs font-semibold tracking-wider"
+                style={{ color: "var(--muted)" }}
+              >
+                {idx.label}
+              </span>
+              {d ? (
                 <>
-                  {portfolio && (
-                    <div
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
-                      style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
-                    >
-                      <span className="text-xs" style={{ color: "var(--muted)" }}>Balance</span>
-                      <AnimatedNumber
-                        value={portfolio.available_balance}
-                        format={formatINR}
-                        className="text-sm font-semibold"
-                        style={{ color: "var(--text)" }}
-                      />
-                    </div>
-                  )}
-                  <motion.div whileHover={{ x: 2 }} transition={{ type: "spring", stiffness: 400, damping: 20 }}>
-                    <Link href="/dashboard" className="text-xs px-3 py-1.5 rounded-lg font-medium" style={{ color: "var(--muted)" }}>
-                      Dashboard
-                    </Link>
-                  </motion.div>
-                  <motion.div whileHover={{ x: 2 }} transition={{ type: "spring", stiffness: 400, damping: 20 }}>
-                    <Link href="/portfolio" className="text-xs px-3 py-1.5 rounded-lg font-medium" style={{ color: "var(--muted)" }}>
-                      Portfolio
-                    </Link>
-                  </motion.div>
-                  <UserButton />
+                  <AnimatedNumber
+                    value={d.value}
+                    format={fmtIdx}
+                    className="text-xs font-semibold"
+                    style={{ color: "var(--text)" }}
+                  />
+                  <span className="text-xs font-semibold" style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
+                    {isUp ? "▲" : "▼"} {Math.abs(d.changePct).toFixed(2)}%
+                  </span>
                 </>
               ) : (
-                <>
-                  <Link href="/sign-in" className="text-sm font-medium" style={{ color: "var(--muted)" }}>
-                    Sign In
-                  </Link>
-                  <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 400, damping: 20 }}>
-                    <Link
-                      href="/sign-up"
-                      className="text-sm px-4 py-1.5 rounded-lg font-semibold shimmer-btn"
-                      style={{ background: "var(--accent)", color: "var(--accent-text)" }}
-                    >
-                      Get Started →
-                    </Link>
-                  </motion.div>
-                </>
+                <span className="text-xs" style={{ color: "var(--text-dim)" }}>—</span>
               )}
-              <ThemeToggleBtn />
             </div>
-
-            {/* Mobile: avatar (if signed in) + hamburger */}
-            <div className="flex sm:hidden items-center gap-2">
-              {isSignedIn && <UserButton />}
-              <motion.button
-                onClick={() => setDrawerOpen(true)}
-                whileTap={{ scale: 0.9 }}
-                className="w-9 h-9 flex flex-col items-center justify-center gap-1.5 rounded-lg"
-                style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
-                aria-label="Open menu"
-              >
-                <span className="block w-4 h-0.5 rounded-full" style={{ background: "var(--text)" }} />
-                <span className="block w-4 h-0.5 rounded-full" style={{ background: "var(--text)" }} />
-                <span className="block w-3 h-0.5 rounded-full" style={{ background: "var(--text)" }} />
-              </motion.button>
-            </div>
-          </div>
-        </header>
+          );
+        })}
       </div>
 
-      {/* Mobile drawer — rendered outside sticky container so it can cover full screen */}
-      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
-    </>
+      {/* Search — desktop only */}
+      <div className="hidden md:block ml-auto mr-2">
+        <SearchBar />
+      </div>
+
+      {/* Auth */}
+      <div className="flex items-center gap-2 ml-auto md:ml-0 flex-shrink-0">
+        {isSignedIn ? (
+          <>
+            {portfolio && (
+              <div
+                className="hidden sm:flex items-center gap-1 px-2 py-1"
+                style={{
+                  background: "var(--bg)",
+                  border: "1px solid var(--border-2)",
+                  borderRadius: "2px",
+                  fontSize: "11px",
+                }}
+              >
+                <span style={{ color: "var(--muted)" }}>₹</span>
+                <AnimatedNumber
+                  value={portfolio.available_balance}
+                  format={fmtBal}
+                  style={{ color: "var(--text)", fontFamily: "var(--font-geist-mono)", fontWeight: 600 }}
+                />
+              </div>
+            )}
+            <UserButton />
+          </>
+        ) : (
+          <Link
+            href="/sign-in"
+            className="text-xs font-bold px-3 py-1.5 transition-opacity hover:opacity-80"
+            style={{
+              color: "var(--accent-text)",
+              background: "var(--accent)",
+              borderRadius: "2px",
+              fontFamily: "var(--font-geist-mono)",
+              letterSpacing: "0.05em",
+            }}
+          >
+            _SIGN_IN
+          </Link>
+        )}
+      </div>
+    </header>
   );
 }
