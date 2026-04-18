@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 export default function SignUpPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -18,10 +20,17 @@ export default function SignUpPage() {
     if (password !== confirm) { setError("Passwords do not match"); return; }
     if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) {
       setError(error.message);
       setLoading(false);
+    } else if (data.user?.identities?.length === 0) {
+      // Email already registered (via Google or password)
+      setError("An account with this email already exists. Please sign in instead.");
+      setLoading(false);
+    } else if (data.session) {
+      // Email confirmation disabled — signed in immediately
+      router.replace("/dashboard");
     } else {
       setDone(true);
     }
