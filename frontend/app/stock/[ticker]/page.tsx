@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/lib/auth-context";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import { useTrading } from "@/lib/trading-context";

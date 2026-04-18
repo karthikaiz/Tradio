@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 import { useTrading } from "@/lib/trading-context";
 import { api } from "@/lib/api";
 import TerminalShell from "@/components/TerminalShell";
@@ -91,10 +93,18 @@ function IndexStrip({ indices }: { indices: IndexTick[] }) {
 }
 
 export default function DashboardPage() {
+  const { isSignedIn } = useAuth();
+  const router = useRouter();
   const { refreshPortfolio } = useTrading();
   const indices = useIndices();
 
+  useEffect(() => {
+    if (!isSignedIn) router.replace("/sign-in");
+  }, [isSignedIn, router]);
+
   useEffect(() => { refreshPortfolio(); }, [refreshPortfolio]);
+
+  if (!isSignedIn) return null;
 
   return (
     <TerminalShell>

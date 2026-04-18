@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "./auth-context";
 import { api, Portfolio } from "./api";
 
 const DEFAULT_WATCHLIST = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "SBIN"];

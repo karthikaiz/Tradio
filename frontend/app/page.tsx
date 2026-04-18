@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/lib/auth-context";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";

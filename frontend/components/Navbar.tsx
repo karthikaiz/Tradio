@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useAuth, UserButton } from "@clerk/nextjs";
+import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
@@ -191,7 +191,7 @@ function SearchBar() {
 }
 
 export default function Navbar() {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, user, signOut } = useAuth();
   const { portfolio } = useTrading();
   const indices = useIndices();
 
@@ -275,7 +275,22 @@ export default function Navbar() {
                 />
               </div>
             )}
-            <UserButton />
+            <button
+              onClick={signOut}
+              className="text-xs font-semibold px-2 py-1 transition-opacity hover:opacity-70"
+              style={{
+                color: "var(--muted)",
+                border: "1px solid var(--border-2)",
+                borderRadius: "2px",
+                fontFamily: "var(--font-geist-mono)",
+                letterSpacing: "0.05em",
+                background: "transparent",
+                cursor: "pointer",
+              }}
+              title={user?.email ?? ""}
+            >
+              {user?.email?.split("@")[0]?.toUpperCase() ?? "SIGN_OUT"}
+            </button>
           </>
         ) : (
           <Link

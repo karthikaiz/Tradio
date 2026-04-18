@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/lib/auth-context";
 import { useTrading } from "@/lib/trading-context";
 import { api, OrderRecord } from "@/lib/api";
 import { useRouter } from "next/navigation";

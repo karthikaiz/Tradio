@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
+import { AuthProvider } from "@/lib/auth-context";
 import { TradingProvider } from "@/lib/trading-context";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
@@ -30,18 +30,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider afterSignOutUrl="/">
-      <html
-        lang="en"
-        suppressHydrationWarning
-        className={`${geistSans.variable} ${geistMono.variable} antialiased dark`}
-      >
-        <body style={{ background: "var(--bg)", color: "var(--text)" }}>
-          <ThemeProvider>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} antialiased dark`}
+    >
+      <body style={{ background: "var(--bg)", color: "var(--text)" }}>
+        <ThemeProvider>
+          <AuthProvider>
             <TradingProvider>{children}</TradingProvider>
-          </ThemeProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </body>
+    </html>
   );
 }
