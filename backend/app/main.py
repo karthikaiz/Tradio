@@ -1,10 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import market, trade, portfolio, orders
+import os
 
 app = FastAPI(title="Tradio API", version="1.0.0")
-
-import os
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -19,6 +18,7 @@ if frontend_url:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
