@@ -1,16 +1,13 @@
 """
-Supabase JWT authentication.
-Verifies Bearer tokens using Supabase's JWKS public key.
+Supabase JWT authentication via /auth/v1/user endpoint.
 Auto-provisions new users with ₹1,00,000 virtual balance on first login.
 """
 import logging
 import os
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
 from fastapi import Depends, Header, HTTPException
-from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,28 +17,8 @@ from app.models import User
 logger = logging.getLogger(__name__)
 
 SUPABASE_PROJECT_REF = os.getenv("SUPABASE_PROJECT_REF", "etnpvqalehpzdrrzugmn")
-SUPABASE_JWKS_URL = os.getenv(
-    "SUPABASE_JWKS_URL",
-    f"https://{SUPABASE_PROJECT_REF}.supabase.co/auth/v1/jwks",
-)
-
-_jwks_cache: dict | None = None
-_jwks_fetched_at: datetime | None = None
-_JWKS_TTL = timedelta(hours=1)
-
-
-async def _get_jwks() -> dict:
-    global _jwks_cache, _jwks_fetched_at
-    now = datetime.now(timezone.utc)
-    if _jwks_cache and _jwks_fetched_at and (now - _jwks_fetched_at) < _JWKS_TTL:
-        return _jwks_cache
-
-    async with httpx.AsyncClient(timeout=5) as client:
-        resp = await client.get(SUPABASE_JWKS_URL)
-        resp.raise_for_status()
-        _jwks_cache = resp.json()
-        _jwks_fetched_at = now
-        return _jwks_cache
+SUPABASE_URL = f"https://{SUPABASE_PROJECT_REF}.supabase.co"
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
 
 async def get_current_user_id(
@@ -51,31 +28,25 @@ async def get_current_user_id(
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
-    token = authorization[7:]
+    if not SUPABASE_ANON_KEY:
+        raise HTTPException(status_code=503, detail="Auth not configured")
 
     try:
-        jwks = await _get_jwks()
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/auth/v1/user",
+                headers={
+                    "apikey": SUPABASE_ANON_KEY,
+                    "Authorization": authorization,
+                },
+            )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid token")
 
-        unverified_header = jwt.get_unverified_header(token)
-        kid = unverified_header.get("kid")
+        supabase_id: str = resp.json()["id"]
 
-        key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
-        if key is None:
-            raise HTTPException(status_code=401, detail="Token signing key not found")
-
-        payload = jwt.decode(
-            token,
-            key,
-            algorithms=["RS256"],
-            options={"verify_aud": False},
-        )
-        supabase_id: str = payload["sub"]
-
-    except JWTError as e:
-        logger.warning(f"JWT verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid token")
     except httpx.HTTPError as e:
-        logger.error(f"Failed to fetch JWKS: {e}")
+        logger.error(f"Failed to verify token with Supabase: {e}")
         raise HTTPException(status_code=503, detail="Auth service unavailable")
 
     async with db.begin():
@@ -90,6 +61,6 @@ async def get_current_user_id(
             )
             db.add(user)
             await db.flush()
-            logger.info(f"Auto-provisioned new user supabase_id={supabase_id} with ₹1,00,000 balance")
+            logger.info(f"Auto-provisioned new user supabase_id={supabase_id}")
 
     return user.id
