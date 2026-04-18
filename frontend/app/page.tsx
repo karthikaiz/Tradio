@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import Navbar from "@/components/Navbar";
@@ -51,7 +52,12 @@ function useIndices() {
 
 export default function LandingPage() {
   const { isSignedIn } = useAuth();
+  const router = useRouter();
   const indices = useIndices();
+
+  useEffect(() => {
+    if (isSignedIn) router.replace("/dashboard");
+  }, [isSignedIn, router]);
 
   if (isSignedIn) return null;
 
