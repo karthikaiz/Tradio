@@ -194,6 +194,16 @@ export default function Navbar() {
   const { isSignedIn, user, signOut } = useAuth();
   const { portfolio } = useTrading();
   const indices = useIndices();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
 
   return (
     <header
@@ -275,22 +285,72 @@ export default function Navbar() {
                 />
               </div>
             )}
-            <button
-              onClick={signOut}
-              className="text-xs font-semibold px-2 py-1 transition-opacity hover:opacity-70"
-              style={{
-                color: "var(--muted)",
-                border: "1px solid var(--border-2)",
-                borderRadius: "2px",
-                fontFamily: "var(--font-geist-mono)",
-                letterSpacing: "0.05em",
-                background: "transparent",
-                cursor: "pointer",
-              }}
-              title={user?.email ?? ""}
-            >
-              {user?.email?.split("@")[0]?.toUpperCase() ?? "SIGN_OUT"}
-            </button>
+            <div ref={menuRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                style={{
+                  color: "var(--muted)",
+                  border: "1px solid var(--border-2)",
+                  borderRadius: "2px",
+                  fontFamily: "var(--font-geist-mono)",
+                  letterSpacing: "0.05em",
+                  background: "transparent",
+                  cursor: "pointer",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  padding: "4px 8px",
+                }}
+              >
+                {user?.email?.split("@")[0]?.toUpperCase() ?? "ACCOUNT"}
+              </button>
+              {menuOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    right: 0,
+                    background: "var(--surface)",
+                    border: "1px solid var(--border-2)",
+                    borderRadius: "2px",
+                    minWidth: "160px",
+                    zIndex: 100,
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      borderBottom: "1px solid var(--border)",
+                      fontSize: "11px",
+                      color: "var(--muted)",
+                      fontFamily: "var(--font-geist-mono)",
+                    }}
+                  >
+                    {user?.email}
+                  </div>
+                  <button
+                    onClick={() => { setMenuOpen(false); signOut(); }}
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px",
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--down)",
+                      fontFamily: "var(--font-geist-mono)",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      letterSpacing: "0.05em",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </>
         ) : (
           <Link
