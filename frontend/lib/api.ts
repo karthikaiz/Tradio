@@ -134,6 +134,27 @@ export interface MarketCategories {
   stable: CategoryStock[];
 }
 
+export interface UserProfile {
+  username: string;
+}
+
+export interface WatchlistResponse {
+  tickers: string[];
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  username: string;
+  total_value: number;
+  total_pnl: number;
+  total_pnl_pct: number;
+}
+
+export interface LeaderboardResponse {
+  entries: LeaderboardEntry[];
+  total_users: number;
+}
+
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 export const api = {
@@ -177,4 +198,31 @@ export const api = {
 
   getOrders: (token: string, limit = 50, offset = 0) =>
     request<OrderRecord[]>(`/api/orders?limit=${limit}&offset=${offset}`, undefined, token),
+
+  getLeaderboard: (limit = 100, signal?: AbortSignal) =>
+    request<LeaderboardResponse>(`/api/leaderboard?limit=${limit}`, { signal }),
+
+  getProfile: (token: string) =>
+    request<UserProfile>("/api/user/profile", undefined, token),
+
+  updateUsername: (username: string, token: string) =>
+    request<UserProfile>("/api/user/username", {
+      method: "PATCH",
+      body: JSON.stringify({ username }),
+    }, token),
+
+  getWatchlist: (token: string) =>
+    request<WatchlistResponse>("/api/watchlist", undefined, token),
+
+  addToWatchlist: (ticker: string, token: string) =>
+    request<{ ticker: string }>("/api/watchlist", {
+      method: "POST",
+      body: JSON.stringify({ ticker }),
+    }, token),
+
+  removeFromWatchlist: (ticker: string, token: string) =>
+    fetch(`/api/watchlist/${encodeURIComponent(ticker)}`, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    }).then((r) => { if (!r.ok && r.status !== 204) throw new Error("Failed to remove"); }),
 };

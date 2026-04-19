@@ -4,7 +4,7 @@ import { createContext, useContext, useState, useCallback, useEffect, ReactNode 
 import { useAuth } from "./auth-context";
 import { api, Portfolio } from "./api";
 
-const DEFAULT_WATCHLIST = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "SBIN"];
+const LS_KEY = "tradio_watchlist";
 
 interface TradingContextValue {
   selectedTicker: string;
@@ -26,39 +26,64 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [selectedPrice, setSelectedPrice] = useState<number | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [portfolioLoading, setPortfolioLoading] = useState(false);
-  const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_WATCHLIST);
+  const [watchlist, setWatchlist] = useState<string[]>([]);
 
-  // Load watchlist from localStorage on mount
+  // Load watchlist: server when signed in, localStorage when signed out
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("tradio_watchlist");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setWatchlist(parsed);
+    if (!isSignedIn) {
+      try {
+        const stored = localStorage.getItem(LS_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) setWatchlist(parsed);
         }
-      }
-    } catch {
-      // ignore
+      } catch {}
+      return;
     }
-  }, []);
+
+    getToken().then(async (token) => {
+      if (!token) return;
+      try {
+        const data = await api.getWatchlist(token);
+        setWatchlist(data.tickers);
+      } catch {}
+    });
+  }, [isSignedIn, getToken]);
 
   const addToWatchlist = useCallback((ticker: string) => {
     setWatchlist((prev) => {
       if (prev.includes(ticker)) return prev;
-      const next = [...prev, ticker];
-      try { localStorage.setItem("tradio_watchlist", JSON.stringify(next)); } catch {}
-      return next;
+      return [...prev, ticker];
     });
-  }, []);
+
+    if (!isSignedIn) {
+      setWatchlist((prev) => {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(prev)); } catch {}
+        return prev;
+      });
+      return;
+    }
+
+    getToken().then((token) => {
+      if (token) api.addToWatchlist(ticker, token).catch(() => {});
+    });
+  }, [isSignedIn, getToken]);
 
   const removeFromWatchlist = useCallback((ticker: string) => {
     setWatchlist((prev) => {
       const next = prev.filter((t) => t !== ticker);
-      try { localStorage.setItem("tradio_watchlist", JSON.stringify(next)); } catch {}
+      if (!isSignedIn) {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch {}
+      }
       return next;
     });
-  }, []);
+
+    if (isSignedIn) {
+      getToken().then((token) => {
+        if (token) api.removeFromWatchlist(ticker, token).catch(() => {});
+      });
+    }
+  }, [isSignedIn, getToken]);
 
   const setSelected = useCallback((ticker: string, price: number) => {
     setSelectedTicker(ticker);
@@ -66,10 +91,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshPortfolio = useCallback(async () => {
-    if (!isSignedIn) {
-      setPortfolio(null);
-      return;
-    }
+    if (!isSignedIn) { setPortfolio(null); return; }
     setPortfolioLoading(true);
     try {
       const token = await getToken();
@@ -77,7 +99,6 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       const data = await api.getPortfolio(token);
       setPortfolio(data);
     } catch {
-      // ignore — user may not be signed in
     } finally {
       setPortfolioLoading(false);
     }

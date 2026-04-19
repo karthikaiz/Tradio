@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, ApiError } from "@/lib/api";
@@ -20,14 +20,12 @@ export default function OrderForm() {
   const { getToken } = useAuth();
   const { selectedTicker, selectedPrice, portfolio, refreshPortfolio } = useTrading();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
-  const [ticker, setTicker] = useState("");
   const [qty, setQty] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  useEffect(() => { if (selectedTicker) setTicker(selectedTicker); }, [selectedTicker]);
-
-  const currentPrice = selectedTicker === ticker ? selectedPrice : null;
+  const ticker = selectedTicker ?? "";
+  const currentPrice = selectedPrice;
   const estimated = currentPrice && qty ? currentPrice * parseInt(qty || "0") : null;
   const balance = portfolio?.available_balance ?? null;
   const holding = portfolio?.holdings.find((h) => h.ticker === ticker);
@@ -137,29 +135,6 @@ export default function OrderForm() {
               {s}
             </button>
           ))}
-        </div>
-
-        {/* Ticker input */}
-        <div>
-          <div
-            className="text-xs mb-1"
-            style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)" }}
-          >
-            &gt; TICKER:
-          </div>
-          <input
-            type="text"
-            value={ticker}
-            onChange={(e) => setTicker(e.target.value.toUpperCase())}
-            placeholder="RELIANCE"
-            className="w-full bg-transparent focus:outline-none text-sm font-bold pb-1"
-            style={{
-              color: "var(--text)",
-              fontFamily: "var(--font-geist-mono)",
-              borderBottom: "1px solid var(--border-2)",
-              letterSpacing: "0.08em",
-            }}
-          />
         </div>
 
         {/* Quantity */}

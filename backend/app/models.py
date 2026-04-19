@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -31,6 +31,7 @@ class User(Base):
 
     portfolio: Mapped[list["Portfolio"]] = relationship(back_populates="user")
     orders: Mapped[list["Order"]] = relationship(back_populates="user")
+    watchlist: Mapped[list["Watchlist"]] = relationship(back_populates="user")
 
 
 class Portfolio(Base):
@@ -44,6 +45,23 @@ class Portfolio(Base):
     avg_buy_price: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="portfolio")
+
+
+class Watchlist(Base):
+    __tablename__ = "watchlist"
+    __table_args__ = (
+        UniqueConstraint("user_id", "ticker_symbol", name="uq_watchlist_user_ticker"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{SCHEMA}.users.id"), nullable=False, index=True)
+    ticker_symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["User"] = relationship(back_populates="watchlist")
 
 
 class Order(Base):

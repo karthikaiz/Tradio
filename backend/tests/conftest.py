@@ -4,6 +4,7 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.main import app
 from app.database import Base, get_db
+from app.auth import get_current_user_id
 from app import models  # noqa: F401 — ensure models are registered on Base
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,11 @@ async def client(db_engine):
         async with session_factory() as session:
             yield session
 
+    async def override_get_current_user_id():
+        return 1
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user_id] = override_get_current_user_id
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()

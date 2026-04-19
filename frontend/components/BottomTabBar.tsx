@@ -28,13 +28,31 @@ const TABS = [
       </svg>
     ),
   },
+  {
+    href: "/leaderboard",
+    label: "RANKS",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 21H5a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2h3" />
+        <path d="M16 21h3a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-3" />
+        <path d="M12 21V9" />
+        <path d="M9 9h6" />
+        <path d="M12 3l2 3H10l2-3z" />
+        <rect x="8" y="9" width="8" height="5" rx="1" />
+      </svg>
+    ),
+  },
 ];
+
+const AUTH_REQUIRED = new Set(["/dashboard", "/portfolio"]);
 
 export default function BottomTabBar() {
   const pathname = usePathname();
   const { isSignedIn } = useAuth();
 
-  if (!isSignedIn) return null;
+  const visibleTabs = isSignedIn ? TABS : TABS.filter((t) => !AUTH_REQUIRED.has(t.href));
+
+  if (visibleTabs.length === 0) return null;
 
   return (
     <nav
@@ -45,7 +63,7 @@ export default function BottomTabBar() {
         borderTop: "1px solid var(--border)",
       }}
     >
-      {TABS.map((tab) => {
+      {visibleTabs.map((tab) => {
         const active = pathname === tab.href || pathname.startsWith(tab.href + "/");
         return (
           <Link

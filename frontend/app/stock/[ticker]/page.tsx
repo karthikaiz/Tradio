@@ -21,7 +21,7 @@ export default function StockPage({ params }: Props) {
   const { ticker } = use(params);
   const symbol = ticker.toUpperCase();
   const { isSignedIn } = useAuth();
-  const { setSelected, portfolio } = useTrading();
+  const { setSelected, portfolio, watchlist, addToWatchlist, removeFromWatchlist } = useTrading();
 
   const [price, setPrice]         = useState<number | null>(null);
   const [prevPrice, setPrevPrice] = useState<number | null>(null);
@@ -83,25 +83,46 @@ export default function StockPage({ params }: Props) {
               <span className="live-dot ml-1" />
             </div>
 
-            {/* Name + symbol */}
-            <div className="flex flex-col">
-              <span
-                className="font-black tracking-tight"
-                style={{
-                  fontSize: "clamp(1.5rem, 4vw, 2.5rem)",
-                  color: "var(--text)",
-                  fontFamily: "var(--font-geist-sans)",
-                  lineHeight: 1.1,
-                }}
-              >
-                {name ?? symbol}
-              </span>
-              <span
-                className="text-sm font-semibold tracking-wider mt-0.5"
-                style={{ color: "var(--text-dim)", fontFamily: "var(--font-geist-mono)" }}
-              >
-                {symbol}
-              </span>
+            {/* Name + symbol + watchlist button */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col">
+                <span
+                  className="font-black tracking-tight"
+                  style={{
+                    fontSize: "clamp(1.5rem, 4vw, 2.5rem)",
+                    color: "var(--text)",
+                    fontFamily: "var(--font-geist-sans)",
+                    lineHeight: 1.1,
+                  }}
+                >
+                  {name ?? symbol}
+                </span>
+                <span
+                  className="text-sm font-semibold tracking-wider mt-0.5"
+                  style={{ color: "var(--text-dim)", fontFamily: "var(--font-geist-mono)" }}
+                >
+                  {symbol}
+                </span>
+              </div>
+              {(() => {
+                const inList = watchlist.includes(symbol);
+                return (
+                  <button
+                    onClick={() => inList ? removeFromWatchlist(symbol) : addToWatchlist(symbol)}
+                    className="flex-shrink-0 px-3 py-1.5 text-xs font-bold tracking-widest transition-colors mt-1"
+                    style={{
+                      fontFamily: "var(--font-geist-mono)",
+                      border: `1px solid ${inList ? "var(--accent)" : "var(--border-2)"}`,
+                      borderRadius: "2px",
+                      background: inList ? "var(--accent-dim)" : "transparent",
+                      color: inList ? "var(--accent)" : "var(--muted)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {inList ? "★ WATCHING" : "+ WATCHLIST"}
+                  </button>
+                );
+              })()}
             </div>
 
             {/* Big price */}

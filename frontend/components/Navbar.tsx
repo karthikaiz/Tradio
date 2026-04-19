@@ -190,11 +190,22 @@ function SearchBar() {
   );
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isAutoUsername(username: string) {
+  return UUID_RE.test(username) || (username.length <= 50 && /^[0-9a-f-]{36}/.test(username));
+}
+
 export default function Navbar() {
-  const { isSignedIn, user, signOut } = useAuth();
+  const { isSignedIn, user, signOut, getToken } = useAuth();
   const { portfolio } = useTrading();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
+  const [usernameInput, setUsernameInput] = useState("");
+  const [usernameError, setUsernameError] = useState("");
+  const [usernameLoading, setUsernameLoading] = useState(false);
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -204,7 +215,120 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", h);
   }, []);
 
+  // Fetch profile to get username and prompt if it's auto-generated
+  useEffect(() => {
+    if (!isSignedIn) { setDisplayName(null); return; }
+    getToken().then(async (token) => {
+      if (!token) return;
+      try {
+        const { username } = await api.getProfile(token);
+        setDisplayName(username);
+        if (isAutoUsername(username)) setShowUsernameModal(true);
+      } catch {}
+    });
+  }, [isSignedIn, getToken]);
+
+  const handleSaveUsername = async () => {
+    const name = usernameInput.trim();
+    if (!name) return;
+    setUsernameError("");
+    setUsernameLoading(true);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      const { username } = await api.updateUsername(name, token);
+      setDisplayName(username);
+      setShowUsernameModal(false);
+      setUsernameInput("");
+    } catch (e: unknown) {
+      setUsernameError(e instanceof Error ? e.message : "Failed to save username");
+    } finally {
+      setUsernameLoading(false);
+    }
+  };
+
   return (
+    <>
+    {/* Username setup modal */}
+    {showUsernameModal && (
+      <div
+        className="fixed inset-0 z-[200] flex items-center justify-center"
+        style={{ background: "rgba(0,0,0,0.7)" }}
+      >
+        <div
+          className="p-6 flex flex-col gap-4"
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border-2)",
+            borderRadius: "2px",
+            width: "320px",
+            boxShadow: "0 16px 48px rgba(0,0,0,0.6)",
+          }}
+        >
+          <div>
+            <div style={{ color: "var(--accent)", fontFamily: "var(--font-geist-mono)", fontSize: "11px", letterSpacing: "0.08em", fontWeight: 700 }}>
+              SET_DISPLAY_NAME
+            </div>
+            <div style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)", fontSize: "11px", marginTop: 4 }}>
+              Choose a name for the leaderboard
+            </div>
+          </div>
+          <input
+            type="text"
+            value={usernameInput}
+            onChange={(e) => { setUsernameInput(e.target.value); setUsernameError(""); }}
+            onKeyDown={(e) => e.key === "Enter" && handleSaveUsername()}
+            placeholder="e.g. trader_hawk"
+            maxLength={20}
+            autoFocus
+            className="bg-transparent focus:outline-none w-full pb-1"
+            style={{
+              fontFamily: "var(--font-geist-mono)",
+              fontSize: "14px",
+              color: "var(--text)",
+              borderBottom: "1px solid var(--accent)",
+              letterSpacing: "0.05em",
+            }}
+          />
+          {usernameError && (
+            <span style={{ color: "var(--down)", fontFamily: "var(--font-geist-mono)", fontSize: "11px" }}>
+              {usernameError}
+            </span>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={handleSaveUsername}
+              disabled={usernameLoading || !usernameInput.trim()}
+              className="flex-1 py-2 text-xs font-bold tracking-widest"
+              style={{
+                fontFamily: "var(--font-geist-mono)",
+                background: usernameLoading || !usernameInput.trim() ? "var(--surface-2)" : "var(--accent)",
+                color: usernameLoading || !usernameInput.trim() ? "var(--muted)" : "var(--bg)",
+                border: "none",
+                borderRadius: "2px",
+                cursor: usernameLoading || !usernameInput.trim() ? "not-allowed" : "pointer",
+              }}
+            >
+              {usernameLoading ? "SAVING..." : "_CONFIRM"}
+            </button>
+            <button
+              onClick={() => setShowUsernameModal(false)}
+              className="px-4 py-2 text-xs"
+              style={{
+                fontFamily: "var(--font-geist-mono)",
+                background: "transparent",
+                color: "var(--muted)",
+                border: "1px solid var(--border-2)",
+                borderRadius: "2px",
+                cursor: "pointer",
+              }}
+            >
+              SKIP
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <header
       className="fixed top-0 left-0 right-0 z-50 flex items-center px-4 gap-4"
       style={{
@@ -263,7 +387,9 @@ export default function Navbar() {
                   padding: "4px 8px",
                 }}
               >
-                {user?.email?.split("@")[0]?.toUpperCase() ?? "ACCOUNT"}
+                {displayName && !isAutoUsername(displayName)
+                ? displayName.toUpperCase()
+                : user?.email?.split("@")[0]?.toUpperCase() ?? "ACCOUNT"}
               </button>
               {menuOpen && (
                 <div
@@ -290,6 +416,26 @@ export default function Navbar() {
                   >
                     {user?.email}
                   </div>
+                  <button
+                    onClick={() => { setMenuOpen(false); setShowUsernameModal(true); }}
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px",
+                      background: "transparent",
+                      border: "none",
+                      borderBottom: "1px solid var(--border)",
+                      color: "var(--text)",
+                      fontFamily: "var(--font-geist-mono)",
+                      fontSize: "12px",
+                      letterSpacing: "0.05em",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    set username
+                  </button>
                   <button
                     onClick={() => { setMenuOpen(false); signOut(); }}
                     style={{
@@ -331,5 +477,6 @@ export default function Navbar() {
         )}
       </div>
     </header>
+    </>
   );
 }
