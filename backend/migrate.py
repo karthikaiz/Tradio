@@ -14,7 +14,7 @@ load_dotenv()
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from app.models import Base, User, Watchlist
+from app.models import Base, User, Watchlist  # noqa — registers all models on Base
 
 DEFAULT_TICKERS: list[str] = []  # no defaults — users build their own watchlist
 

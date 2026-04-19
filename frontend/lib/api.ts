@@ -155,6 +155,41 @@ export interface LeaderboardResponse {
   total_users: number;
 }
 
+export interface ChallengeInfo {
+  id: number;
+  name: string;
+  creator_id: number;
+  starting_balance: number;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+  status: "upcoming" | "active" | "ended";
+  participant_count: number;
+}
+
+export interface ChallengeListResponse {
+  challenges: ChallengeInfo[];
+  total: number;
+}
+
+export interface ChallengeLeaderboardEntry {
+  rank: number;
+  user_id: number;
+  username: string;
+  total_value: number;
+  total_pnl: number;
+  total_pnl_pct: number;
+}
+
+export interface ChallengeLeaderboardResponse {
+  entries: ChallengeLeaderboardEntry[];
+  challenge_id: number;
+}
+
+export interface ChallengePortfolio extends Portfolio {
+  starting_balance: number;
+}
+
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 export const api = {
@@ -225,4 +260,46 @@ export const api = {
       method: "DELETE",
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
     }).then((r) => { if (!r.ok && r.status !== 204) throw new Error("Failed to remove"); }),
+
+  // Challenges
+  listChallenges: (signal?: AbortSignal) =>
+    request<ChallengeListResponse>("/api/challenges", { signal }),
+
+  getChallenge: (id: number, signal?: AbortSignal) =>
+    request<ChallengeInfo>(`/api/challenges/${id}`, { signal }),
+
+  createChallenge: (data: { name: string; starting_balance: number; start_date: string; end_date: string }, token: string) =>
+    request<ChallengeInfo>("/api/challenges", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }, token),
+
+  joinChallenge: (id: number, token: string) =>
+    request<{ joined: boolean; balance: number }>(`/api/challenges/${id}/join`, {
+      method: "POST",
+    }, token),
+
+  challengeMe: (id: number, token: string) =>
+    request<{ joined: boolean }>(`/api/challenges/${id}/me`, undefined, token),
+
+  challengeLeaderboard: (id: number, signal?: AbortSignal) =>
+    request<ChallengeLeaderboardResponse>(`/api/challenges/${id}/leaderboard`, { signal }),
+
+  challengePortfolio: (id: number, token: string) =>
+    request<ChallengePortfolio>(`/api/challenges/${id}/portfolio`, undefined, token),
+
+  challengeOrders: (id: number, token: string, limit = 50) =>
+    request<OrderRecord[]>(`/api/challenges/${id}/orders?limit=${limit}`, undefined, token),
+
+  challengeBuy: (id: number, ticker: string, quantity: number, token: string) =>
+    request<TradeResult>(`/api/challenges/${id}/buy`, {
+      method: "POST",
+      body: JSON.stringify({ ticker, quantity }),
+    }, token),
+
+  challengeSell: (id: number, ticker: string, quantity: number, token: string) =>
+    request<TradeResult>(`/api/challenges/${id}/sell`, {
+      method: "POST",
+      body: JSON.stringify({ ticker, quantity }),
+    }, token),
 };
