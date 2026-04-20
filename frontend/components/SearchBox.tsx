@@ -9,9 +9,11 @@ import { useTrading } from "@/lib/trading-context";
 interface Props {
   showWatchButton?: boolean;
   placeholder?: string;
+  onSelect?: (ticker: string, name: string) => void;
+  compact?: boolean;
 }
 
-export default function SearchBox({ showWatchButton = false, placeholder = "Search stocks — e.g. RELIANCE, TCS, INFY" }: Props) {
+export default function SearchBox({ showWatchButton = false, placeholder = "Search stocks — e.g. RELIANCE, TCS, INFY", onSelect, compact = false }: Props) {
   const router = useRouter();
   const { addToWatchlist } = useTrading();
   const [query, setQuery] = useState("");
@@ -47,8 +49,12 @@ export default function SearchBox({ showWatchButton = false, placeholder = "Sear
     return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  const select = (ticker: string) => {
-    router.push(`/stock/${ticker}`);
+  const select = (ticker: string, name: string) => {
+    if (onSelect) {
+      onSelect(ticker, name);
+    } else {
+      router.push(`/stock/${ticker}`);
+    }
     setQuery(""); setResults([]); setFocused(false);
   };
 
@@ -56,40 +62,42 @@ export default function SearchBox({ showWatchButton = false, placeholder = "Sear
     <div ref={wrapRef} className="relative w-full">
       {/* Input */}
       <div
-        className="flex items-center gap-3 px-4 w-full transition-all"
+        className="relative w-full transition-all"
         style={{
-          height: "52px",
+          height: compact ? "36px" : "52px",
           background: "var(--surface)",
           border: `1px solid ${focused ? "var(--accent)" : "var(--border-2)"}`,
           borderRadius: "4px",
           boxShadow: focused ? "0 0 0 2px var(--accent-dim)" : "none",
         }}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-          style={{ color: focused ? "var(--accent)" : "var(--muted)", flexShrink: 0 }}>
-          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-        </svg>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => setFocused(true)}
-          placeholder={placeholder}
-          className="flex-1 bg-transparent focus:outline-none text-sm"
-          style={{
-            fontFamily: "var(--font-geist-mono)",
-            color: "var(--text)",
-            letterSpacing: "0.02em",
-          }}
-        />
-        {loading && (
-          <span className="text-xs" style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)" }}>···</span>
-        )}
+        <div className="flex items-center h-full" style={{ paddingLeft: compact ? "12px" : "16px", paddingRight: query ? "36px" : compact ? "12px" : "16px" }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ color: focused ? "var(--accent)" : "var(--muted)", flexShrink: 0, marginRight: "8px" }}>
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          </svg>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setFocused(true)}
+            placeholder={placeholder}
+            className="flex-1 bg-transparent focus:outline-none text-sm min-w-0"
+            style={{
+              fontFamily: "var(--font-geist-mono)",
+              color: "var(--text)",
+              letterSpacing: "0.02em",
+            }}
+          />
+          {loading && (
+            <span className="text-xs flex-shrink-0" style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)" }}>···</span>
+          )}
+        </div>
         {query && (
           <button
             onClick={() => { setQuery(""); setResults([]); }}
-            className="text-xs flex-shrink-0"
-            style={{ color: "var(--muted)" }}
+            className="absolute flex items-center justify-center"
+            style={{ right: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--muted)", width: "20px", height: "20px", fontSize: "14px", background: "none", border: "none", cursor: "pointer", padding: 0 }}
           >
             ✕
           </button>
@@ -115,7 +123,7 @@ export default function SearchBox({ showWatchButton = false, placeholder = "Sear
             {results.map((r, i) => (
               <div
                 key={r.ticker}
-                onMouseDown={(e) => { e.preventDefault(); select(r.ticker); }}
+                onMouseDown={(e) => { e.preventDefault(); select(r.ticker, r.name); }}
                 className="flex items-center justify-between px-4 py-3 cursor-pointer"
                 style={{
                   borderBottom: i < results.length - 1 ? "1px solid var(--border)" : "none",

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, use, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, ChallengeInfo, ChallengeLeaderboardEntry, ChallengePortfolio, OrderRecord, ApiError } from "@/lib/api";
 import TerminalShell from "@/components/TerminalShell";
+import SearchBox from "@/components/SearchBox";
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -50,6 +51,7 @@ export default function ChallengePage({ params }: Props) {
 
   // Trade form state
   const [ticker, setTicker] = useState("");
+  const [tickerName, setTickerName] = useState("");
   const [qty, setQty] = useState("");
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [submitting, setSubmitting] = useState(false);
@@ -152,6 +154,8 @@ export default function ChallengePage({ params }: Props) {
         addToast(`SOLD ${qtyInt} ${sym} @ ${fmtINR2(r.execution_price)}${pnlStr}`, "success");
       }
       setQty("");
+      setTicker("");
+      setTickerName("");
       refreshLeaderboard();
       refreshPortfolio();
     } catch (err: unknown) {
@@ -400,7 +404,7 @@ export default function ChallengePage({ params }: Props) {
                           <tr
                             key={h.ticker}
                             style={{ cursor: "pointer" }}
-                            onClick={() => { setTicker(h.ticker); setSide("SELL"); }}
+                            onClick={() => { setTicker(h.ticker); setTickerName(""); setSide("SELL"); }}
                           >
                             <td style={{ ...tdStyle, color: "var(--accent)" }}>{h.ticker}</td>
                             <td style={{ ...tdStyle, textAlign: "right" }}>{h.quantity}</td>
@@ -527,30 +531,36 @@ export default function ChallengePage({ params }: Props) {
                     ))}
                   </div>
 
-                  {/* Ticker input */}
+                  {/* Stock search */}
                   <div>
-                    <label style={{ display: "block", fontSize: "10px", fontFamily: "var(--font-geist-mono)", color: "var(--muted)", letterSpacing: "0.08em", marginBottom: "5px" }}>TICKER</label>
-                    <input
-                      value={ticker}
-                      onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                      placeholder="e.g. RELIANCE"
-                      maxLength={20}
-                      disabled={!isActive}
-                      style={{
-                        width: "100%",
+                    <label style={{ display: "block", fontSize: "10px", fontFamily: "var(--font-geist-mono)", color: "var(--muted)", letterSpacing: "0.08em", marginBottom: "5px" }}>STOCK</label>
+                    {ticker ? (
+                      <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
                         padding: "8px 10px",
                         background: "var(--surface)",
-                        border: "1px solid var(--border-2)",
+                        border: "1px solid var(--accent)",
                         borderRadius: "2px",
-                        color: "var(--text)",
-                        fontSize: "12px",
-                        fontFamily: "var(--font-geist-mono)",
-                        outline: "none",
                         boxSizing: "border-box",
-                      }}
-                      onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
-                      onBlur={(e) => (e.target.style.borderColor = "var(--border-2)")}
-                    />
+                      }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--accent)", fontFamily: "var(--font-geist-mono)" }}>{ticker}</div>
+                          {tickerName && <div style={{ fontSize: "10px", color: "var(--muted)", fontFamily: "var(--font-geist-mono)", marginTop: "1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tickerName}</div>}
+                        </div>
+                        <button
+                          onClick={() => { setTicker(""); setTickerName(""); setTradePrice(null); }}
+                          style={{ color: "var(--muted)", fontSize: "12px", background: "none", border: "none", cursor: "pointer", flexShrink: 0, paddingLeft: "8px" }}
+                        >✕</button>
+                      </div>
+                    ) : (
+                      <SearchBox
+                        placeholder="Search stock name…"
+                        compact
+                        onSelect={(t, name) => { setTicker(t); setTickerName(name || t); }}
+                      />
+                    )}
                   </div>
 
                   {/* Quantity */}
