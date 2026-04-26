@@ -2,7 +2,7 @@ import logging
 from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models import User, Portfolio, Order, OrderSide, OrderStatus
+from app.models import User, Portfolio, Order, OrderSide, OrderStatus, TradeReason
 from app.services.market import get_price, MarketDataError
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ def round_money(value: float | Decimal) -> Decimal:
     return Decimal(str(value)).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
-async def execute_buy(db: AsyncSession, ticker: str, quantity: int, user_id: int) -> dict:
+async def execute_buy(db: AsyncSession, ticker: str, quantity: int, user_id: int, trade_reason: TradeReason | None = None) -> dict:
     # 1. Fetch price
     try:
         raw_price = await get_price(ticker)
@@ -73,6 +73,7 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int, user_id: int
             execution_price=price,
             realized_pnl=None,
             status=OrderStatus.EXECUTED,
+            trade_reason=trade_reason,
         )
         db.add(order)
 
@@ -88,7 +89,7 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int, user_id: int
     }
 
 
-async def execute_sell(db: AsyncSession, ticker: str, quantity: int, user_id: int) -> dict:
+async def execute_sell(db: AsyncSession, ticker: str, quantity: int, user_id: int, trade_reason: TradeReason | None = None) -> dict:
     # 1. Check holdings first (before hitting market data)
     async with db.begin():
         port_result = await db.execute(
@@ -138,6 +139,7 @@ async def execute_sell(db: AsyncSession, ticker: str, quantity: int, user_id: in
             execution_price=price,
             realized_pnl=realized_pnl,
             status=OrderStatus.EXECUTED,
+            trade_reason=trade_reason,
         )
         db.add(order)
 

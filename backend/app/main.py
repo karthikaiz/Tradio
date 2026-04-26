@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import market, trade, portfolio, orders, leaderboard, watchlist, user, challenges
+from app.routers import market, trade, portfolio, orders, watchlist, user, coach
 import os
 
 app = FastAPI(title="Tradio API", version="1.0.0")
@@ -28,10 +28,9 @@ app.include_router(market.router)
 app.include_router(trade.router)
 app.include_router(portfolio.router)
 app.include_router(orders.router)
-app.include_router(leaderboard.router)
 app.include_router(watchlist.router)
 app.include_router(user.router)
-app.include_router(challenges.router)
+app.include_router(coach.router)
 
 
 @app.get("/health")

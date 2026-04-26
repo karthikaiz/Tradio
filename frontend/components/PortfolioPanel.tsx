@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { getTickerName } from "@/lib/ticker-names";
 import { motion, AnimatePresence } from "framer-motion";
 import AnimatedNumber from "./ui/AnimatedNumber";
+import PortfolioChart from "./PortfolioChart";
 
 type Tab = "holdings" | "orders";
 
@@ -34,14 +35,19 @@ export default function PortfolioPanel() {
 
   useEffect(() => { refreshPortfolio(); }, [refreshPortfolio]);
 
+  // Fetch all orders on mount (used by chart + orders tab)
   useEffect(() => {
-    if (tab !== "orders") return;
     setOrdersLoading(true);
-    getToken()
-      .then((token) => token ? api.getOrders(token, 50, 0) : null)
-      .then((data) => { if (data) setOrders(data); })
-      .finally(() => setOrdersLoading(false));
-  }, [tab, getToken]);
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const data = await api.getOrders(token, 500, 0);
+        if (data) setOrders(data);
+      } catch { /* ignore — chart shows empty state */ }
+      finally { setOrdersLoading(false); }
+    })();
+  }, [getToken]);
 
   const thStyle: React.CSSProperties = {
     color: "var(--muted)",
@@ -88,6 +94,9 @@ export default function PortfolioPanel() {
           ))}
         </div>
       )}
+
+      {/* P&L Chart */}
+      <PortfolioChart orders={orders} portfolio={portfolio ?? null} />
 
       {/* Tabs */}
       <div className="flex border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
@@ -267,6 +276,11 @@ export default function PortfolioPanel() {
                             <div className="text-xs" style={{ color: "var(--text-dim)", fontFamily: "var(--font-geist-mono)", fontSize: "10px" }}>
                               {ts}
                             </div>
+                            {o.trade_reason && (
+                              <div className="text-xs mt-0.5" style={{ color: "var(--accent)", fontFamily: "var(--font-geist-mono)", fontSize: "9px", letterSpacing: "0.06em", opacity: 0.8 }}>
+                                {o.trade_reason.replace(/_/g, " ")}
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-3 text-left">
                             <span className="text-xs font-bold" style={{ color: o.side === "BUY" ? "var(--up)" : "var(--down)", fontFamily: "var(--font-geist-mono)" }}>

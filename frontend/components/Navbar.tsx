@@ -270,7 +270,7 @@ export default function Navbar() {
               SET_DISPLAY_NAME
             </div>
             <div style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)", fontSize: "11px", marginTop: 4 }}>
-              Choose a name for the leaderboard
+              Choose a name for your Tradio profile
             </div>
           </div>
           <input
@@ -348,6 +348,13 @@ export default function Navbar() {
         </span>
       </Link>
 
+
+      {/* Search — desktop only */}
+      {isSignedIn && (
+        <div className="hidden md:block flex-1 max-w-xs">
+          <SearchBar />
+        </div>
+      )}
 
       {/* Auth */}
       <div className="flex items-center gap-2 ml-auto flex-shrink-0">

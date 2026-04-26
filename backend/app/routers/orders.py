@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("/orders")
 async def get_orders(
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
@@ -35,6 +35,7 @@ async def get_orders(
             "execution_price": float(o.execution_price),
             "realized_pnl": float(o.realized_pnl) if o.realized_pnl is not None else None,
             "status": o.status.value,
+            "trade_reason": o.trade_reason.value if o.trade_reason is not None else None,
             "timestamp": o.timestamp.isoformat(),
         }
         for o in orders

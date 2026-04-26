@@ -10,6 +10,7 @@ import StockList from "@/components/StockList";
 import MarketCategories from "@/components/MarketCategories";
 import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import SearchBox from "@/components/SearchBox";
+import OnboardingModal, { useOnboarding } from "@/components/OnboardingModal";
 
 const fmtIdx = (v: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(v);
@@ -97,6 +98,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const { refreshPortfolio } = useTrading();
   const indices = useIndices();
+  const { show: showOnboarding, done: onboardingDone } = useOnboarding();
 
   useEffect(() => {
     if (!isSignedIn) router.replace("/sign-in");
@@ -108,12 +110,18 @@ export default function DashboardPage() {
 
   return (
     <TerminalShell>
+      <OnboardingModal show={showOnboarding} onDone={onboardingDone} />
       <div className="flex flex-col min-h-[calc(100vh-56px)] overflow-y-auto">
 
         {/* ── 1. Scrolling index strip ──────────────────────── */}
         <IndexStrip indices={indices} />
 
-        {/* ── 2. Market Overview ───────────────────────────── */}
+        {/* ── 2. Search bar — mobile only ──────────────────── */}
+        <div className="md:hidden px-4 pt-4 pb-2">
+          <SearchBox showWatchButton placeholder="Search stocks — RELIANCE, TCS, INFY…" />
+        </div>
+
+        {/* ── 3. Market Overview ───────────────────────────── */}
         <section className="px-4 md:px-8 py-8 w-full max-w-5xl mx-auto">
           <div
             className="text-xs font-semibold tracking-widest mb-4"

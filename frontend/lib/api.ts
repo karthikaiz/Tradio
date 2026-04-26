@@ -107,6 +107,16 @@ export interface TradeResult {
   new_balance: number;
 }
 
+export type TradeReason =
+  | "MOMENTUM"
+  | "NEWS"
+  | "LONG_TERM"
+  | "FRIEND_TIP"
+  | "GUT_FEELING"
+  | "CHART_PATTERN"
+  | "SECTOR_TREND"
+  | "CUSTOM";
+
 export interface OrderRecord {
   order_id: number;
   ticker: string;
@@ -115,6 +125,7 @@ export interface OrderRecord {
   execution_price: number;
   realized_pnl: number | null;
   status: string;
+  trade_reason: TradeReason | null;
   timestamp: string;
 }
 
@@ -142,52 +153,37 @@ export interface WatchlistResponse {
   tickers: string[];
 }
 
-export interface LeaderboardEntry {
-  rank: number;
-  username: string;
-  total_value: number;
-  total_pnl: number;
-  total_pnl_pct: number;
-}
-
-export interface LeaderboardResponse {
-  entries: LeaderboardEntry[];
-  total_users: number;
-}
-
-export interface ChallengeInfo {
-  id: number;
+export interface CoachHolding {
+  ticker: string;
   name: string;
-  creator_id: number;
-  starting_balance: number;
-  start_date: string;
-  end_date: string;
-  created_at: string;
-  status: "upcoming" | "active" | "ended";
-  participant_count: number;
+  quantity: number;
+  avg_buy_price: number;
+  current_price: number | null;
+  invested_value: number;
+  unrealized_pnl: number | null;
+  unrealized_pnl_pct: number | null;
 }
 
-export interface ChallengeListResponse {
-  challenges: ChallengeInfo[];
-  total: number;
+export interface CoachFeedbackRequest {
+  ticker: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  execution_price: number;
+  trade_reason: TradeReason | null;
+  custom_reason?: string | null;
+  price_change_pct?: number | null;
+  portfolio_context: {
+    available_balance: number;
+    total_invested: number;
+    total_unrealized_pnl: number;
+    total_unrealized_pnl_pct: number;
+    holdings: CoachHolding[];
+  };
 }
 
-export interface ChallengeLeaderboardEntry {
-  rank: number;
-  user_id: number;
-  username: string;
-  total_value: number;
-  total_pnl: number;
-  total_pnl_pct: number;
-}
-
-export interface ChallengeLeaderboardResponse {
-  entries: ChallengeLeaderboardEntry[];
-  challenge_id: number;
-}
-
-export interface ChallengePortfolio extends Portfolio {
-  starting_balance: number;
+export interface CoachFeedbackResponse {
+  feedback: string;
+  tone: "positive" | "warning" | "info";
 }
 
 // ── API Functions ─────────────────────────────────────────────────────────────
@@ -216,16 +212,16 @@ export const api = {
     request<MarketCategories>("/api/market/categories", { signal }),
 
   // Auth-required endpoints
-  buy: (ticker: string, quantity: number, token: string) =>
+  buy: (ticker: string, quantity: number, token: string, trade_reason?: TradeReason | null) =>
     request<TradeResult>("/api/trade/buy", {
       method: "POST",
-      body: JSON.stringify({ ticker, quantity }),
+      body: JSON.stringify({ ticker, quantity, trade_reason: trade_reason ?? null }),
     }, token),
 
-  sell: (ticker: string, quantity: number, token: string) =>
+  sell: (ticker: string, quantity: number, token: string, trade_reason?: TradeReason | null) =>
     request<TradeResult>("/api/trade/sell", {
       method: "POST",
-      body: JSON.stringify({ ticker, quantity }),
+      body: JSON.stringify({ ticker, quantity, trade_reason: trade_reason ?? null }),
     }, token),
 
   getPortfolio: (token: string) =>
@@ -233,9 +229,6 @@ export const api = {
 
   getOrders: (token: string, limit = 50, offset = 0) =>
     request<OrderRecord[]>(`/api/orders?limit=${limit}&offset=${offset}`, undefined, token),
-
-  getLeaderboard: (limit = 100, signal?: AbortSignal) =>
-    request<LeaderboardResponse>(`/api/leaderboard?limit=${limit}`, { signal }),
 
   getProfile: (token: string) =>
     request<UserProfile>("/api/user/profile", undefined, token),
@@ -261,45 +254,10 @@ export const api = {
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
     }).then((r) => { if (!r.ok && r.status !== 204) throw new Error("Failed to remove"); }),
 
-  // Challenges
-  listChallenges: (signal?: AbortSignal) =>
-    request<ChallengeListResponse>("/api/challenges", { signal }),
-
-  getChallenge: (id: number, signal?: AbortSignal) =>
-    request<ChallengeInfo>(`/api/challenges/${id}`, { signal }),
-
-  createChallenge: (data: { name: string; starting_balance: number; start_date: string; end_date: string }, token: string) =>
-    request<ChallengeInfo>("/api/challenges", {
+  getCoachFeedback: (req: CoachFeedbackRequest, token: string) =>
+    request<CoachFeedbackResponse>("/api/coach/feedback", {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify(req),
     }, token),
 
-  joinChallenge: (id: number, token: string) =>
-    request<{ joined: boolean; balance: number }>(`/api/challenges/${id}/join`, {
-      method: "POST",
-    }, token),
-
-  challengeMe: (id: number, token: string) =>
-    request<{ joined: boolean }>(`/api/challenges/${id}/me`, undefined, token),
-
-  challengeLeaderboard: (id: number, signal?: AbortSignal) =>
-    request<ChallengeLeaderboardResponse>(`/api/challenges/${id}/leaderboard`, { signal }),
-
-  challengePortfolio: (id: number, token: string) =>
-    request<ChallengePortfolio>(`/api/challenges/${id}/portfolio`, undefined, token),
-
-  challengeOrders: (id: number, token: string, limit = 50) =>
-    request<OrderRecord[]>(`/api/challenges/${id}/orders?limit=${limit}`, undefined, token),
-
-  challengeBuy: (id: number, ticker: string, quantity: number, token: string) =>
-    request<TradeResult>(`/api/challenges/${id}/buy`, {
-      method: "POST",
-      body: JSON.stringify({ ticker, quantity }),
-    }, token),
-
-  challengeSell: (id: number, ticker: string, quantity: number, token: string) =>
-    request<TradeResult>(`/api/challenges/${id}/sell`, {
-      method: "POST",
-      body: JSON.stringify({ ticker, quantity }),
-    }, token),
 };

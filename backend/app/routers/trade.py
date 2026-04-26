@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user_id
 from app.services.market import MarketDataError
+from app.models import TradeReason
 from app.services.trade import (
     execute_buy,
     execute_sell,
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 class TradeRequest(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=20)
     quantity: int = Field(..., gt=0)
+    trade_reason: TradeReason | None = None
 
 
 @router.post("/buy")
@@ -30,7 +32,7 @@ async def buy(
 ):
     ticker = req.ticker.upper().strip()
     try:
-        result = await execute_buy(db, ticker, req.quantity, user_id)
+        result = await execute_buy(db, ticker, req.quantity, user_id, req.trade_reason)
         return result
     except MarketDataError as e:
         raise HTTPException(
@@ -56,7 +58,7 @@ async def sell(
 ):
     ticker = req.ticker.upper().strip()
     try:
-        result = await execute_sell(db, ticker, req.quantity, user_id)
+        result = await execute_sell(db, ticker, req.quantity, user_id, req.trade_reason)
         return result
     except MarketDataError as e:
         raise HTTPException(

@@ -1,3 +1,4 @@
+groq
 fastapi
 uvicorn[standard]
 sqlalchemy[asyncio]

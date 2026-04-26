@@ -17,7 +17,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) { supabase.auth.signOut(); setSession(null); }
+      else setSession(data.session);
+    });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => {
       setSession(s);
@@ -26,9 +29,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const getToken = async () => {
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
+  const getToken = async (): Promise<string | null> => {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        await supabase.auth.signOut();
+        window.location.href = "/sign-in";
+        return null;
+      }
+      return data.session?.access_token ?? null;
+    } catch {
+      await supabase.auth.signOut();
+      window.location.href = "/sign-in";
+      return null;
+    }
   };
 
   const signOut = async () => {

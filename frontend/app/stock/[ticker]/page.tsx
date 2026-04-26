@@ -180,14 +180,14 @@ export default function StockPage({ params }: Props) {
           </div>
 
           {/* Chart — fills remaining height */}
-          <div className="flex-1 min-h-[300px] md:min-h-0 md:overflow-hidden">
+          <div className="flex-1 min-h-[240px] sm:min-h-[300px] md:min-h-0 md:overflow-hidden">
             <ChartPanel ticker={symbol} />
           </div>
         </div>
 
         {/* ── Right: Order entry ───────────────────────────── */}
         <div
-          className="md:w-72 md:flex-shrink-0 flex flex-col border-t md:border-t-0 md:border-l"
+          className="md:w-72 md:flex-shrink-0 flex flex-col border-t md:border-t-0 md:border-l pb-16 md:pb-0"
           style={{ borderColor: "var(--border)" }}
         >
           {isSignedIn ? (
@@ -197,7 +197,7 @@ export default function StockPage({ params }: Props) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
-              className="flex flex-col items-center justify-center h-full min-h-[220px] p-6 text-center"
+              className="flex flex-col items-center justify-center h-full min-h-[220px] px-6 pt-6 pb-24 md:p-6 text-center"
               style={{ background: "var(--surface)" }}
             >
               <div
@@ -230,7 +230,7 @@ export default function StockPage({ params }: Props) {
               </Link>
               <Link
                 href="/sign-in"
-                className="block w-full text-center py-2.5 text-xs font-semibold"
+                className="hidden md:block w-full text-center py-2.5 text-xs font-semibold"
                 style={{
                   border: "1px solid var(--border-2)",
                   color: "var(--muted)",

@@ -33,6 +33,17 @@ export default function SignInPage() {
     });
   };
 
+  const handleDevLogin = async () => {
+    setError("");
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: "karthik@gmail.com",
+      password: "Karthik@12",
+    });
+    if (error) { setError(error.message); setLoading(false); }
+    else router.replace("/dashboard");
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "var(--bg)" }}>
       <div style={{ width: "100%", maxWidth: "380px" }}>
@@ -72,6 +83,7 @@ export default function SignInPage() {
             </label>
             <input
               type="email"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -109,6 +121,7 @@ export default function SignInPage() {
             <div style={{ position: "relative" }}>
               <input
                 type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -210,6 +223,32 @@ export default function SignInPage() {
             sign up
           </Link>
         </p>
+
+        {process.env.NODE_ENV === "development" && (
+          <div style={{ marginTop: "24px", borderTop: "1px dashed var(--border)", paddingTop: "16px" }}>
+            <p style={{ textAlign: "center", fontSize: "9px", color: "var(--muted)", fontFamily: "var(--font-geist-mono)", letterSpacing: "0.08em", marginBottom: "8px" }}>
+              DEV_ONLY
+            </p>
+            <button
+              onClick={handleDevLogin}
+              disabled={loading}
+              style={{
+                width: "100%",
+                padding: "9px",
+                background: "transparent",
+                border: "1px dashed var(--border-2)",
+                borderRadius: "2px",
+                color: "var(--muted)",
+                fontFamily: "var(--font-geist-mono)",
+                fontSize: "11px",
+                letterSpacing: "0.06em",
+                cursor: loading ? "not-allowed" : "pointer",
+              }}
+            >
+              {loading ? "..." : "⚡ karthik@gmail.com"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

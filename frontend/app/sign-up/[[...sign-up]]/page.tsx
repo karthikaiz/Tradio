@@ -104,6 +104,7 @@ export default function SignUpPage() {
             <label style={labelStyle}>EMAIL</label>
             <input
               type="email"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -119,6 +120,7 @@ export default function SignUpPage() {
             <div style={{ position: "relative" }}>
               <input
                 type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -138,6 +140,7 @@ export default function SignUpPage() {
             <div style={{ position: "relative" }}>
               <input
                 type={showConfirm ? "text" : "password"}
+                autoComplete="new-password"
                 required
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}

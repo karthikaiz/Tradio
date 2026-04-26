@@ -20,7 +20,9 @@ export default function StatusBar() {
         fontSize: "11px",
       }}
     >
-      <span style={{ color: "var(--muted)", letterSpacing: "0.08em" }}>PORTFOLIO_SUMMARY</span>
+      <span style={{ color: "var(--muted)", letterSpacing: "0.08em" }}>
+        {portfolio ? "PORTFOLIO_SUMMARY" : "MARKET_STATUS"}
+      </span>
 
       {portfolio && (
         <>
