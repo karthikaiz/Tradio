@@ -33,13 +33,10 @@ export default function SignInPage() {
     });
   };
 
-  const handleDevLogin = async () => {
+  const handleDevLogin = async (email: string, password: string) => {
     setError("");
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: "karthik@gmail.com",
-      password: "Karthik@12",
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) { setError(error.message); setLoading(false); }
     else router.replace("/dashboard");
   };
@@ -229,24 +226,44 @@ export default function SignInPage() {
             <p style={{ textAlign: "center", fontSize: "9px", color: "var(--muted)", fontFamily: "var(--font-geist-mono)", letterSpacing: "0.08em", marginBottom: "8px" }}>
               DEV_ONLY
             </p>
-            <button
-              onClick={handleDevLogin}
-              disabled={loading}
-              style={{
-                width: "100%",
-                padding: "9px",
-                background: "transparent",
-                border: "1px dashed var(--border-2)",
-                borderRadius: "2px",
-                color: "var(--muted)",
-                fontFamily: "var(--font-geist-mono)",
-                fontSize: "11px",
-                letterSpacing: "0.06em",
-                cursor: loading ? "not-allowed" : "pointer",
-              }}
-            >
-              {loading ? "..." : "⚡ karthik@gmail.com"}
-            </button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => handleDevLogin("karthik@gmail.com", "Karthik@12")}
+                disabled={loading}
+                style={{
+                  flex: 1,
+                  padding: "9px",
+                  background: "transparent",
+                  border: "1px dashed var(--border-2)",
+                  borderRadius: "2px",
+                  color: "var(--muted)",
+                  fontFamily: "var(--font-geist-mono)",
+                  fontSize: "11px",
+                  letterSpacing: "0.06em",
+                  cursor: loading ? "not-allowed" : "pointer",
+                }}
+              >
+                {loading ? "..." : "⚡ karthik"}
+              </button>
+              <button
+                onClick={() => handleDevLogin("karthik12@gmail.com", "Karthik@12")}
+                disabled={loading}
+                style={{
+                  flex: 1,
+                  padding: "9px",
+                  background: "transparent",
+                  border: "1px dashed var(--border-2)",
+                  borderRadius: "2px",
+                  color: "var(--muted)",
+                  fontFamily: "var(--font-geist-mono)",
+                  fontSize: "11px",
+                  letterSpacing: "0.06em",
+                  cursor: loading ? "not-allowed" : "pointer",
+                }}
+              >
+                {loading ? "..." : "⚡ karthik12"}
+              </button>
+            </div>
           </div>
         )}
       </div>

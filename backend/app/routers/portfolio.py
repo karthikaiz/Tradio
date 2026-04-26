@@ -1,11 +1,12 @@
 import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user_id
-from app.models import User, Portfolio, Order, OrderSide
+from app.models import User, Portfolio, Order, OrderSide, TradeReason
 from app.services.market import get_price, MarketDataError
 from app.services.trade import round_money
 
@@ -94,4 +95,117 @@ async def get_portfolio(
         "total_unrealized_pnl_pct": total_unrealized_pnl_pct,
         "total_realized_pnl": total_realized_pnl,
         "holdings": holdings_out,
+    }
+
+
+@router.get("/portfolio/health")
+async def get_portfolio_health(
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    # Load holdings
+    port_result = await db.execute(select(Portfolio).where(Portfolio.user_id == user_id))
+    holdings = port_result.scalars().all()
+
+    # Load orders from last 30 days
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    orders_result = await db.execute(
+        select(Order).where(Order.user_id == user_id, Order.timestamp >= cutoff)
+    )
+    recent_orders = orders_result.scalars().all()
+
+    # Load all orders ever for discipline score
+    all_orders_result = await db.execute(
+        select(Order).where(Order.user_id == user_id)
+    )
+    all_orders = all_orders_result.scalars().all()
+
+    num_holdings = len(holdings)
+
+    # ── Diversification (25 pts) ──────────────────────────────
+    if num_holdings == 0:
+        diversification = 15   # all cash is neutral
+    elif num_holdings == 1:
+        diversification = 5
+    elif num_holdings == 2:
+        diversification = 10
+    elif num_holdings in (3, 4):
+        diversification = 18
+    else:
+        diversification = 25
+
+    # ── Concentration (25 pts) ────────────────────────────────
+    if num_holdings == 0:
+        concentration = 25
+    else:
+        total_invested = sum(float(h.avg_buy_price) * h.total_quantity for h in holdings)
+        if total_invested == 0:
+            concentration = 25
+        else:
+            max_holding_pct = max(
+                (float(h.avg_buy_price) * h.total_quantity / total_invested * 100)
+                for h in holdings
+            )
+            if max_holding_pct < 30:
+                concentration = 25
+            elif max_holding_pct <= 50:
+                concentration = 15
+            else:
+                concentration = 5
+
+    # ── New user shortcut ─────────────────────────────────────
+    if num_holdings == 0 and not all_orders:
+        return {
+            "score": 0,
+            "label": "NEW",
+            "breakdown": {"diversification": 0, "concentration": 0, "activity": 0, "discipline": 0},
+        }
+
+    # ── Activity (25 pts) ─────────────────────────────────────
+    weeks = 4  # 30-day window ≈ 4 weeks
+    trades_per_week = len(recent_orders) / weeks if weeks else 0
+    if len(recent_orders) == 0:
+        activity = 0
+    elif trades_per_week <= 5:
+        activity = 25
+    elif trades_per_week <= 10:
+        activity = 15
+    else:
+        activity = 5
+
+    # ── Discipline (25 pts) ───────────────────────────────────
+    if not all_orders:
+        discipline = 0
+    else:
+        with_reason = sum(1 for o in all_orders if o.trade_reason is not None)
+        ratio = with_reason / len(all_orders)
+        if ratio >= 0.8:
+            discipline = 25
+        elif ratio >= 0.5:
+            discipline = 18
+        elif ratio >= 0.25:
+            discipline = 10
+        else:
+            discipline = 3
+
+    score = diversification + concentration + activity + discipline
+
+    if score >= 85:
+        label = "DISCIPLINED"
+    elif score >= 65:
+        label = "CONSISTENT"
+    elif score >= 40:
+        label = "DEVELOPING"
+    else:
+        label = "LEARNING"
+
+    return {
+        "score": score,
+        "label": label,
+        "breakdown": {
+            "diversification": diversification,
+            "concentration": concentration,
+            "activity": activity,
+            "discipline": discipline,
+        },
     }

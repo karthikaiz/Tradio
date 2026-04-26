@@ -18,10 +18,22 @@ VALID_PAYLOAD = {
     "execution_price": 250.0,
     "trade_reason": "MOMENTUM",
     "portfolio_context": {
-        "holdings_count": 3,
-        "top_holding_pct": 40,
-        "cash_pct": 30,
-        "total_pnl_pct": 2.5,
+        "available_balance": 80000.0,
+        "total_invested": 20000.0,
+        "total_unrealized_pnl": 500.0,
+        "total_unrealized_pnl_pct": 2.5,
+        "holdings": [
+            {
+                "ticker": "RELIANCE",
+                "name": "Reliance Industries",
+                "quantity": 10,
+                "avg_buy_price": 1200.0,
+                "current_price": 1250.0,
+                "invested_value": 12000.0,
+                "unrealized_pnl": 500.0,
+                "unrealized_pnl_pct": 4.17,
+            }
+        ],
     },
 }
 

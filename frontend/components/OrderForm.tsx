@@ -38,8 +38,8 @@ const TONE_COLOR: Record<string, string> = {
 
 const HEADER_LABEL: Partial<Record<Phase, string>> = {
   reason:   "_WHY_THIS_TRADE",
-  coaching: "_AI_COACH",
-  review:   "_AI_COACH",
+  coaching: "AI_COACH",
+  review:   "AI_COACH",
 };
 
 export default function OrderForm() {

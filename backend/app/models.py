@@ -26,6 +26,12 @@ class TradeReason(str, enum.Enum):
     CUSTOM = "CUSTOM"
 
 
+class UserGoal(str, enum.Enum):
+    LEARN_BASICS = "LEARN_BASICS"
+    PRACTICE_STOCKS = "PRACTICE_STOCKS"
+    DEVELOP_STRATEGY = "DEVELOP_STRATEGY"
+
+
 SCHEMA = "tradio"
 
 
@@ -38,6 +44,9 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     virtual_balance: Mapped[float] = mapped_column(
         Numeric(15, 2), nullable=False, default=100000.00
+    )
+    goal: Mapped[UserGoal | None] = mapped_column(
+        SAEnum(UserGoal, native_enum=False), nullable=True
     )
 
     portfolio: Mapped[list["Portfolio"]] = relationship(back_populates="user")

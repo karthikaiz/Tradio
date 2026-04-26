@@ -11,6 +11,7 @@ import MarketCategories from "@/components/MarketCategories";
 import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import SearchBox from "@/components/SearchBox";
 import OnboardingModal, { useOnboarding } from "@/components/OnboardingModal";
+import HealthScoreWidget from "@/components/HealthScoreWidget";
 
 const fmtIdx = (v: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(v);
@@ -121,7 +122,12 @@ export default function DashboardPage() {
           <SearchBox showWatchButton placeholder="Search stocks — RELIANCE, TCS, INFY…" />
         </div>
 
-        {/* ── 3. Market Overview ───────────────────────────── */}
+        {/* ── 3. Health Score ──────────────────────────────── */}
+        <section className="px-4 md:px-8 pt-6 pb-2 w-full max-w-5xl mx-auto">
+          <HealthScoreWidget />
+        </section>
+
+        {/* ── 4. Market Overview ──────────────────────────── */}
         <section className="px-4 md:px-8 py-8 w-full max-w-5xl mx-auto">
           <div
             className="text-xs font-semibold tracking-widest mb-4"

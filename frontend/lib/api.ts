@@ -145,8 +145,11 @@ export interface MarketCategories {
   stable: CategoryStock[];
 }
 
+export type UserGoal = "LEARN_BASICS" | "PRACTICE_STOCKS" | "DEVELOP_STRATEGY";
+
 export interface UserProfile {
   username: string;
+  goal: UserGoal | null;
 }
 
 export interface WatchlistResponse {
@@ -184,6 +187,17 @@ export interface CoachFeedbackRequest {
 export interface CoachFeedbackResponse {
   feedback: string;
   tone: "positive" | "warning" | "info";
+}
+
+export interface HealthScore {
+  score: number;
+  label: "NEW" | "LEARNING" | "DEVELOPING" | "CONSISTENT" | "DISCIPLINED";
+  breakdown: {
+    diversification: number;
+    concentration: number;
+    activity: number;
+    discipline: number;
+  };
 }
 
 // ── API Functions ─────────────────────────────────────────────────────────────
@@ -258,6 +272,15 @@ export const api = {
     request<CoachFeedbackResponse>("/api/coach/feedback", {
       method: "POST",
       body: JSON.stringify(req),
+    }, token),
+
+  getHealthScore: (token: string) =>
+    request<HealthScore>("/api/portfolio/health", undefined, token),
+
+  setGoal: (goal: UserGoal, token: string) =>
+    request<{ goal: UserGoal }>("/api/user/goal", {
+      method: "PATCH",
+      body: JSON.stringify({ goal }),
     }, token),
 
 };

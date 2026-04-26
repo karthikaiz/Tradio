@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user_id
-from app.models import User
+from app.models import User, UserGoal
 
 router = APIRouter(prefix="/api/user", tags=["user"])
 logger = logging.getLogger(__name__)
@@ -19,6 +19,10 @@ class UpdateUsernameRequest(BaseModel):
     username: str
 
 
+class UpdateGoalRequest(BaseModel):
+    goal: UserGoal
+
+
 @router.get("/profile")
 async def get_profile(
     db: AsyncSession = Depends(get_db),
@@ -26,7 +30,7 @@ async def get_profile(
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one()
-    return {"username": user.username}
+    return {"username": user.username, "goal": user.goal}
 
 
 @router.patch("/username")
@@ -54,3 +58,17 @@ async def update_username(
 
     logger.info(f"User {user_id} set username to '{username}'")
     return {"username": username}
+
+
+@router.patch("/goal")
+async def update_goal(
+    body: UpdateGoalRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one()
+    user.goal = body.goal
+    await db.commit()
+    logger.info(f"User {user_id} set goal to '{body.goal}'")
+    return {"goal": user.goal}

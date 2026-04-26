@@ -41,6 +41,12 @@ async def migrate():
         await conn.execute(sa.text(
             "ALTER TABLE tradio.orders ADD COLUMN IF NOT EXISTS trade_reason VARCHAR(20)"
         ))
+
+    print("Adding goal column to users if missing...")
+    async with engine.begin() as conn:
+        await conn.execute(sa.text(
+            "ALTER TABLE tradio.users ADD COLUMN IF NOT EXISTS goal VARCHAR(30)"
+        ))
     print("Schema up to date.")
 
     # Backfill default watchlist for users who have none
