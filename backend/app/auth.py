@@ -43,7 +43,11 @@ async def get_current_user_id(
         if resp.status_code != 200:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        supabase_id: str = resp.json()["id"]
+        try:
+            supabase_id: str = resp.json()["id"]
+        except (KeyError, ValueError) as e:
+            logger.error("Unexpected Supabase response: %s — %s", resp.text[:200], e)
+            raise HTTPException(status_code=503, detail="Auth service returned unexpected response")
 
     except httpx.HTTPError as e:
         logger.error(f"Failed to verify token with Supabase: {e}")

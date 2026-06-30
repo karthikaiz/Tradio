@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -21,7 +21,9 @@ async def get_portfolio(
 ):
     # Load user
     result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one()
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
 
     # Load all holdings
     port_result = await db.execute(select(Portfolio).where(Portfolio.user_id == user_id))
@@ -37,7 +39,7 @@ async def get_portfolio(
 
     price_results = await asyncio.gather(
         *[fetch_holding_price(h) for h in holdings],
-        return_exceptions=False,
+        return_exceptions=True,
     )
 
     # Build holdings response
@@ -45,7 +47,11 @@ async def get_portfolio(
     total_invested = 0.0
     total_current_value = 0.0
 
-    for holding, price, error in price_results:
+    for item in price_results:
+        if isinstance(item, Exception):
+            logger.error("Price fetch failed unexpectedly: %s", item)
+            continue
+        holding, price, error = item
         invested = float(round_money(holding.avg_buy_price * holding.total_quantity))
         total_invested += invested
 
