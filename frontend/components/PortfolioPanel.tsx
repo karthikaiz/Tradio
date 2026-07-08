@@ -31,11 +31,27 @@ export default function PortfolioPanel() {
   const [tab, setTab] = useState<Tab>("holdings");
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [historyPoints, setHistoryPoints] = useState<{ time: number; value: number }[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => { refreshPortfolio(); }, [refreshPortfolio]);
 
-  // Fetch all orders on mount (used by chart + orders tab)
+  // Fetch portfolio value history (real market prices) on mount
+  useEffect(() => {
+    setHistoryLoading(true);
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const data = await api.getPortfolioHistory(token);
+        if (data?.points) setHistoryPoints(data.points);
+      } catch { /* ignore — chart shows empty state */ }
+      finally { setHistoryLoading(false); }
+    })();
+  }, [getToken]);
+
+  // Fetch all orders on mount (used by orders tab)
   useEffect(() => {
     setOrdersLoading(true);
     (async () => {
@@ -44,7 +60,7 @@ export default function PortfolioPanel() {
         if (!token) return;
         const data = await api.getOrders(token, 500, 0);
         if (data) setOrders(data);
-      } catch { /* ignore — chart shows empty state */ }
+      } catch { /* ignore */ }
       finally { setOrdersLoading(false); }
     })();
   }, [getToken]);
@@ -96,7 +112,7 @@ export default function PortfolioPanel() {
       )}
 
       {/* P&L Chart */}
-      <PortfolioChart orders={orders} portfolio={portfolio ?? null} />
+      <PortfolioChart points={historyPoints} portfolio={portfolio ?? null} historyLoading={historyLoading} />
 
       {/* Tabs */}
       <div className="flex border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>

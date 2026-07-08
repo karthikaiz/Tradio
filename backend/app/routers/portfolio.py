@@ -1,6 +1,8 @@
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+import math
+from collections import defaultdict
+from datetime import date, datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -215,3 +217,122 @@ async def get_portfolio_health(
             "discipline": discipline,
         },
     }
+
+
+@router.get("/portfolio/history")
+async def get_portfolio_history(
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    """Return daily portfolio value history using actual yfinance closing prices."""
+    import yfinance as yf
+
+    STARTING_BALANCE = 100_000.0
+
+    orders_result = await db.execute(
+        select(Order).where(Order.user_id == user_id).order_by(Order.timestamp)
+    )
+    orders = orders_result.scalars().all()
+
+    if not orders:
+        return {"points": []}
+
+    first_dt = orders[0].timestamp.date()
+    end_dt = date.today() + timedelta(days=1)
+    tickers = list({o.ticker_symbol for o in orders})
+
+    def fetch_histories() -> dict[str, dict[str, float]]:
+        result: dict[str, dict[str, float]] = {}
+        for ticker in tickers:
+            ticker_ns = ticker if ticker.startswith("^") else f"{ticker}.NS"
+            try:
+                hist = yf.Ticker(ticker_ns).history(
+                    start=first_dt.isoformat(),
+                    end=end_dt.isoformat(),
+                    auto_adjust=True,
+                )
+                result[ticker] = {}
+                for ts, row in hist.iterrows():
+                    close = row.get("Close")
+                    if close is not None and not math.isnan(float(close)) and float(close) > 0:
+                        result[ticker][str(ts.date())] = float(close)
+            except Exception:
+                result[ticker] = {}
+        return result
+
+    loop = asyncio.get_event_loop()
+    price_history = await loop.run_in_executor(None, fetch_histories)
+
+    # Group orders by date string
+    orders_by_date: dict[str, list] = defaultdict(list)
+    for o in orders:
+        orders_by_date[str(o.timestamp.date())].append(o)
+
+    # Collect all trading dates that yfinance returned across any ticker
+    all_dates = sorted({
+        d
+        for prices in price_history.values()
+        for d in prices
+        if d >= str(first_dt)
+    })
+
+    cash = STARTING_BALANCE
+    holdings: dict[str, dict] = {}  # {ticker: {qty, avgPrice}}
+    last_price: dict[str, float] = {}
+
+    points = []
+    for date_str in all_dates:
+        for o in orders_by_date.get(date_str, []):
+            qty = o.quantity
+            exec_price = float(o.execution_price)
+            ticker = o.ticker_symbol
+
+            if o.order_side == OrderSide.BUY:
+                cash -= qty * exec_price
+                prev = holdings.get(ticker, {"qty": 0, "avgPrice": 0.0})
+                new_qty = prev["qty"] + qty
+                holdings[ticker] = {
+                    "qty": new_qty,
+                    "avgPrice": (prev["qty"] * prev["avgPrice"] + qty * exec_price) / new_qty,
+                }
+            else:
+                cash += qty * exec_price
+                prev = holdings.get(ticker)
+                if prev:
+                    remaining = prev["qty"] - qty
+                    if remaining <= 0:
+                        holdings.pop(ticker, None)
+                    else:
+                        holdings[ticker] = {"qty": remaining, "avgPrice": prev["avgPrice"]}
+
+        holdings_val = 0.0
+        for ticker, h in holdings.items():
+            price = price_history.get(ticker, {}).get(date_str)
+            if price is not None:
+                last_price[ticker] = price
+            else:
+                price = last_price.get(ticker, h["avgPrice"])
+            holdings_val += h["qty"] * price
+
+        # Use noon IST (06:30 UTC) as the canonical daily timestamp
+        d = date.fromisoformat(date_str)
+        ts = int(datetime(d.year, d.month, d.day, 6, 30, 0, tzinfo=timezone.utc).timestamp())
+        points.append({"time": ts, "value": round(cash + holdings_val)})
+
+    # Append live endpoint using current balance + live market prices
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    port_result = await db.execute(select(Portfolio).where(Portfolio.user_id == user_id))
+    live_holdings = port_result.scalars().all()
+
+    if user and live_holdings:
+        live_holdings_val = sum(
+            last_price.get(h.ticker_symbol, float(h.avg_buy_price)) * h.total_quantity
+            for h in live_holdings
+        )
+        live_total = float(user.virtual_balance) + live_holdings_val
+        live_ts = int(datetime.now(timezone.utc).timestamp())
+        if not points or live_ts > points[-1]["time"]:
+            points.append({"time": live_ts, "value": round(live_total)})
+
+    return {"points": points}
