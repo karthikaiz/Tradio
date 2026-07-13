@@ -1,86 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef } from "react";
 import { createChart, IChartApi, ISeriesApi, AreaSeries, Time } from "lightweight-charts";
-import { OrderRecord, Portfolio } from "@/lib/api";
+import { Portfolio } from "@/lib/api";
 
 const STARTING_BALANCE = 100_000;
 
 const fmtINR = (v: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(v);
 
-interface Point { time: number; value: number }
-
-function buildChartData(orders: OrderRecord[], portfolio: Portfolio | null): Point[] {
-  const sorted = [...orders].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
-
-  let cash = STARTING_BALANCE;
-  const holdings: Record<string, { qty: number; avgPrice: number }> = {};
-  const points: Point[] = [];
-  const usedTimes = new Set<number>();
-
-  const uniqueTime = (t: number) => {
-    while (usedTimes.has(t)) t++;
-    usedTimes.add(t);
-    return t;
-  };
-
-  if (sorted.length > 0) {
-    const firstT = Math.floor(new Date(sorted[0].timestamp).getTime() / 1000) - 60;
-    points.push({ time: uniqueTime(firstT), value: STARTING_BALANCE });
-  }
-
-  for (const order of sorted) {
-    const t = uniqueTime(Math.floor(new Date(order.timestamp).getTime() / 1000));
-
-    if (order.side === "BUY") {
-      cash -= order.quantity * order.execution_price;
-      const prev = holdings[order.ticker] ?? { qty: 0, avgPrice: 0 };
-      const newQty = prev.qty + order.quantity;
-      holdings[order.ticker] = {
-        qty: newQty,
-        avgPrice: (prev.qty * prev.avgPrice + order.quantity * order.execution_price) / newQty,
-      };
-    } else {
-      cash += order.quantity * order.execution_price;
-      const prev = holdings[order.ticker];
-      if (prev) {
-        const remaining = prev.qty - order.quantity;
-        if (remaining <= 0) delete holdings[order.ticker];
-        else holdings[order.ticker] = { qty: remaining, avgPrice: prev.avgPrice };
-      }
-    }
-
-    const holdingsVal = Object.values(holdings).reduce((s, h) => s + h.qty * h.avgPrice, 0);
-    points.push({ time: t, value: Math.round(cash + holdingsVal) });
-  }
-
-  // Live endpoint using current market prices
-  if (portfolio && sorted.length > 0) {
-    const liveVal = portfolio.available_balance + (portfolio.total_current_value ?? 0);
-    const liveT = uniqueTime(Math.floor(Date.now() / 1000));
-    if (liveT > (points[points.length - 1]?.time ?? 0)) {
-      points.push({ time: liveT, value: Math.round(liveVal) });
-    }
-  }
-
-  return points;
-}
+interface ChartPoint { time: number; value: number }
 
 interface Props {
-  orders: OrderRecord[];
+  points: ChartPoint[] | null;
   portfolio: Portfolio | null;
+  historyLoading?: boolean;
 }
 
-export default function PortfolioChart({ orders, portfolio }: Props) {
+export default function PortfolioChart({ points, portfolio, historyLoading }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const seriesRef = useRef<ISeriesApi<"Area"> | any>(null);
-
-  const points = useMemo(() => buildChartData(orders, portfolio), [orders, portfolio]);
 
   const liveValue = portfolio
     ? portfolio.available_balance + (portfolio.total_current_value ?? 0)
@@ -89,6 +30,8 @@ export default function PortfolioChart({ orders, portfolio }: Props) {
   const isUp = pnl >= 0;
   const lineColor = isUp ? "#00C076" : "#FF3B30";
   const topColor = isUp ? "rgba(0,192,118,0.18)" : "rgba(255,59,48,0.18)";
+
+  const hasPoints = points && points.length >= 2;
 
   // Create chart once
   useEffect(() => {
@@ -138,15 +81,15 @@ export default function PortfolioChart({ orders, portfolio }: Props) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update data + colors when points/portfolio change
+  // Update data + colors when points change
   useEffect(() => {
-    if (!seriesRef.current || !chartRef.current || points.length < 2) return;
+    if (!seriesRef.current || !chartRef.current || !hasPoints) return;
     seriesRef.current.applyOptions({ lineColor, topColor, bottomColor: "rgba(0,0,0,0)" });
-    seriesRef.current.setData(points.map((p) => ({ time: p.time as Time, value: p.value })));
+    seriesRef.current.setData(points!.map((p) => ({ time: p.time as Time, value: p.value })));
     chartRef.current.timeScale().fitContent();
-  }, [points, lineColor, topColor]);
+  }, [points, lineColor, topColor, hasPoints]);
 
-  const isEmpty = orders.length === 0;
+  const isEmpty = !hasPoints;
 
   return (
     <div style={{ borderBottom: "1px solid var(--border)" }}>
@@ -171,7 +114,7 @@ export default function PortfolioChart({ orders, portfolio }: Props) {
       <div style={{ position: "relative", height: "150px" }}>
         <div ref={containerRef} style={{ height: "100%", width: "100%" }} />
 
-        {/* Empty state overlay */}
+        {/* Loading / empty overlay */}
         {isEmpty && (
           <div
             style={{
@@ -185,7 +128,7 @@ export default function PortfolioChart({ orders, portfolio }: Props) {
                 PORTFOLIO_CHART
               </div>
               <div style={{ fontFamily: "var(--font-geist-mono)", fontSize: "11px", color: "var(--text-dim)", marginTop: "6px" }}>
-                Place a trade to see your chart
+                {historyLoading ? "Loading history…" : "Place a trade to see your chart"}
               </div>
             </div>
           </div>

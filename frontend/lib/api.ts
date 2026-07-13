@@ -277,6 +277,9 @@ export const api = {
   getHealthScore: (token: string) =>
     request<HealthScore>("/api/portfolio/health", undefined, token),
 
+  getPortfolioHistory: (token: string, signal?: AbortSignal) =>
+    request<{ points: { time: number; value: number }[] }>("/api/portfolio/history", { signal }, token),
+
   setGoal: (goal: UserGoal, token: string) =>
     request<{ goal: UserGoal }>("/api/user/goal", {
       method: "PATCH",

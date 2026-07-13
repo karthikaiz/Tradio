@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # In-memory cache: {ticker: (price, fetched_at)}
 _cache: dict[str, tuple[float, datetime]] = {}
-CACHE_TTL_SECONDS = 3
+CACHE_TTL_SECONDS = 30
 
 
 class MarketDataError(Exception):
@@ -20,14 +20,25 @@ class MarketDataError(Exception):
 def _fetch_price_sync(ticker_ns: str) -> float:
     """Synchronous yfinance call — always run via run_in_executor."""
     stock = yf.Ticker(ticker_ns)
-    info = stock.info
 
-    # Primary: currentPrice
-    price = info.get("currentPrice")
-    if price and price > 0:
-        return float(price)
+    # Primary: fast_info — single lightweight quote request, ~10x cheaper
+    # than .info (which downloads the full quote summary)
+    try:
+        price = stock.fast_info.last_price
+        if price and price > 0:
+            return float(price)
+    except Exception:
+        pass
 
-    # Fallback: latest closing price from history
+    # Fallback: full info blob
+    try:
+        price = stock.info.get("currentPrice")
+        if price and price > 0:
+            return float(price)
+    except Exception:
+        pass
+
+    # Last resort: latest closing price from history
     hist = stock.history(period="1d")
     if not hist.empty:
         return float(hist["Close"].iloc[-1])
@@ -38,7 +49,7 @@ def _fetch_price_sync(ticker_ns: str) -> float:
 async def get_price(ticker: str) -> float:
     """
     Returns the current INR price for a NSE ticker.
-    Appends .NS internally. Caches results for 60 seconds.
+    Appends .NS internally. Caches results for CACHE_TTL_SECONDS.
     Raises MarketDataError on any failure.
     """
     now = datetime.now(timezone.utc)
