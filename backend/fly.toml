@@ -6,7 +6,7 @@
 # bot's TRADIO_BASE_URL) to whatever name you pick.
 
 app = "tradio-backend"
-primary_region = "bom"   # Mumbai — closest to NSE + you; change if you prefer ams (where algobot runs)
+primary_region = "ams"   # Amsterdam — same region as algobot; bom (Mumbai) had no capacity at deploy time
 
 # 256MB is tight for FastAPI+yfinance (~165MB baseline) — swap absorbs
 # the spikes from /market/categories and /portfolio/history instead of
