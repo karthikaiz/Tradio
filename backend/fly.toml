@@ -1,0 +1,44 @@
+# Tradio backend on Fly.io
+# Deployed by .github/workflows/deploy-backend.yml (FLY_API_TOKEN secret).
+#
+# NOTE: Fly app names are globally unique — if "tradio-backend" is taken,
+# change `app` here (and the URL in Vercel's NEXT_PUBLIC_API_URL + the
+# bot's TRADIO_BASE_URL) to whatever name you pick.
+
+app = "tradio-backend"
+primary_region = "bom"   # Mumbai — closest to NSE + you; change if you prefer ams (where algobot runs)
+
+# 256MB is tight for FastAPI+yfinance (~165MB baseline) — swap absorbs
+# the spikes from /market/categories and /portfolio/history instead of
+# letting the OOM killer restart the machine mid-request.
+swap_size_mb = 512
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TZ               = "Asia/Kolkata"
+  PYTHONUNBUFFERED = "1"
+
+[http_service]
+  internal_port        = 8080
+  force_https          = true
+  auto_stop_machines   = "stop"   # sleep when idle (off-market hours) — costs ~nothing while stopped
+  auto_start_machines  = true     # wake on first incoming request
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 20
+    hard_limit = 30
+
+  [[http_service.checks]]
+    interval     = "30s"
+    timeout      = "5s"
+    grace_period = "15s"
+    method       = "GET"
+    path         = "/health"
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"
