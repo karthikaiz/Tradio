@@ -1,0 +1,32 @@
+name: Deploy Backend to Fly.io
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Create app if it doesn't exist yet (first deploy only)
+        working-directory: backend
+        run: flyctl status --app tradio-backend || flyctl apps create tradio-backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # --ha=false is IMPORTANT: without it Fly creates 2 machines for high
+      # availability, which doubles the bill. One 256MB machine only.
+      - name: Deploy to Fly.io
+        working-directory: backend
+        run: flyctl deploy --remote-only --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
