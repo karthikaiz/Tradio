@@ -1,4 +1,5 @@
 import logging
+import os
 from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,9 +10,21 @@ logger = logging.getLogger(__name__)
 
 CENT = Decimal("0.01")
 
+# Paper-fill slippage in basis points: buys fill above the quote, sells below,
+# mimicking real spread + impact so paper results don't flatter live trading.
+# Default 0 keeps existing behaviour/tests; production sets ~5 bps via env.
+PAPER_SLIPPAGE_BPS = float(os.getenv("PAPER_SLIPPAGE_BPS", "0"))
+
 
 def round_money(value: float | Decimal) -> Decimal:
     return Decimal(str(value)).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def _slip(raw_price: float, side: OrderSide) -> float:
+    if PAPER_SLIPPAGE_BPS <= 0:
+        return raw_price
+    factor = 1 + PAPER_SLIPPAGE_BPS / 10_000 * (1 if side == OrderSide.BUY else -1)
+    return raw_price * factor
 
 
 async def execute_buy(db: AsyncSession, ticker: str, quantity: int, user_id: int, trade_reason: TradeReason | None = None) -> dict:
@@ -21,7 +34,7 @@ async def execute_buy(db: AsyncSession, ticker: str, quantity: int, user_id: int
     except MarketDataError as e:
         raise e
 
-    price = round_money(raw_price)
+    price = round_money(_slip(raw_price, OrderSide.BUY))
     total_cost = round_money(price * quantity)
 
     async with db.begin():
@@ -114,7 +127,7 @@ async def execute_sell(db: AsyncSession, ticker: str, quantity: int, user_id: in
         except MarketDataError as e:
             raise e
 
-        price = round_money(raw_price)
+        price = round_money(_slip(raw_price, OrderSide.SELL))
         proceeds = round_money(price * quantity)
         avg_buy = round_money(holding.avg_buy_price)
         realized_pnl = round_money((price - avg_buy) * quantity)

@@ -256,3 +256,36 @@ async def test_sell_market_data_error(client, db_session, held_position):
     assert holding.total_quantity == 10
 
     logger.info("Verified: market data error on sell returns 503, holdings unchanged")
+
+
+
+# ── Paper slippage model ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_slippage_moves_fills_against_the_trader(client, seeded_user):
+    """With PAPER_SLIPPAGE_BPS set, buys fill above the quote and sells below."""
+    from app.services import trade as trade_mod
+
+    with patch.object(trade_mod, "PAPER_SLIPPAGE_BPS", 10.0):  # 10 bps
+        with mock_price(1000.00):
+            buy = await client.post(
+                "/api/trade/buy", json={"ticker": "SLIPTEST", "quantity": 2})
+            assert buy.status_code == 200
+            assert buy.json()["execution_price"] == 1001.00   # +10 bps
+
+            sell = await client.post(
+                "/api/trade/sell", json={"ticker": "SLIPTEST", "quantity": 2})
+            assert sell.status_code == 200
+            assert sell.json()["execution_price"] == 999.00   # -10 bps
+
+
+@pytest.mark.asyncio
+async def test_slippage_default_zero_fills_at_quote(client, seeded_user):
+    from app.services import trade as trade_mod
+    assert trade_mod.PAPER_SLIPPAGE_BPS == 0.0   # default keeps fills exact
+
+    with mock_price(500.00):
+        buy = await client.post(
+            "/api/trade/buy", json={"ticker": "NOSLIP", "quantity": 1})
+        assert buy.status_code == 200
+        assert buy.json()["execution_price"] == 500.00
