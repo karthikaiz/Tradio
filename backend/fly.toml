@@ -19,6 +19,9 @@ swap_size_mb = 512
 [env]
   TZ               = "Asia/Kolkata"
   PYTHONUNBUFFERED = "1"
+  # Paper fills: buys +5 bps, sells −5 bps — mimics real spread/impact so
+  # paper P&L doesn't flatter live results. Tests run with 0 (default).
+  PAPER_SLIPPAGE_BPS = "5"
 
 [http_service]
   internal_port        = 8080
