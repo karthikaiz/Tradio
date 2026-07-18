@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
-import { api, ApiError, TradeReason, CoachFeedbackResponse } from "@/lib/api";
+import { api, ApiError, TradeReason, CoachFeedbackResponse, MarketStatus } from "@/lib/api";
 import { getTickerName } from "@/lib/ticker-names";
 import { useTrading } from "@/lib/trading-context";
 import AnimatedNumber from "./ui/AnimatedNumber";
@@ -53,6 +53,22 @@ export default function OrderForm() {
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [coachAdvice, setCoachAdvice] = useState<CoachFeedbackResponse | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const s = await api.getMarketStatus();
+        if (!cancelled) setMarketStatus(s);
+      } catch {
+        // silently ignore — no banner if fetch fails
+      }
+    };
+    check();
+    const id = setInterval(check, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   const ticker = selectedTicker ?? "";
   const currentPrice = selectedPrice;
@@ -61,8 +77,10 @@ export default function OrderForm() {
   const holding = portfolio?.holdings.find((h) => h.ticker === ticker);
   const maxSell = holding?.quantity ?? 0;
   const qtyInt = parseInt(qty);
+  const marketOpen = marketStatus?.open !== false; // default open while loading
   const canSubmit =
     phase === "entry" &&
+    marketOpen &&
     ticker.trim().length > 0 &&
     qtyInt > 0 &&
     Number.isInteger(qtyInt) &&
@@ -194,6 +212,50 @@ export default function OrderForm() {
         </span>
         <span className="text-xs" style={{ color: "var(--text-dim)", fontFamily: "var(--font-geist-mono)" }}>MARKET</span>
       </div>
+
+      {/* Market closed banner */}
+      <AnimatePresence>
+        {marketStatus && !marketStatus.open && (
+          <motion.div
+            key="market-closed"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="px-4 py-2.5 flex-shrink-0"
+            style={{
+              background: "var(--surface-2)",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <div className="flex items-start gap-2">
+              <span className="text-xs flex-shrink-0" style={{ color: "#f59e0b" }}>⏸</span>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold" style={{ color: "#f59e0b", fontFamily: "var(--font-geist-mono)", letterSpacing: "0.04em" }}>
+                  MARKET CLOSED
+                </span>
+                <span className="text-xs" style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)" }}>
+                  {marketStatus.reason}
+                </span>
+                {marketStatus.next_open && (
+                  <span className="text-xs" style={{ color: "var(--text-dim)", fontFamily: "var(--font-geist-mono)" }}>
+                    Opens:{" "}
+                    {new Date(marketStatus.next_open).toLocaleString("en-IN", {
+                      timeZone: "Asia/Kolkata",
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    IST
+                  </span>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence mode="wait">
         {/* ── Reason picker ── */}
@@ -485,7 +547,7 @@ export default function OrderForm() {
               }}
               whileTap={canSubmit ? { scale: 0.97 } : undefined}
             >
-              {`_EXECUTE_${side}`}
+              {!marketOpen ? "MARKET CLOSED" : `_EXECUTE_${side}`}
             </motion.button>
           </motion.div>
         )}

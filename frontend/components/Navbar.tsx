@@ -356,6 +356,26 @@ export default function Navbar() {
         </div>
       )}
 
+      {/* Bot nav link — desktop only */}
+      {isSignedIn && (
+        <Link
+          href="/bot"
+          className="hidden md:flex items-center gap-1.5 px-2 py-1 flex-shrink-0"
+          style={{
+            color: "var(--muted)",
+            fontFamily: "var(--font-geist-mono)",
+            fontSize: "11px",
+            letterSpacing: "0.05em",
+            border: "1px solid var(--border-2)",
+            borderRadius: "2px",
+            textDecoration: "none",
+          }}
+        >
+          <span style={{ color: "var(--up)", fontSize: "8px" }}>●</span>
+          BOT
+        </Link>
+      )}
+
       {/* Auth */}
       <div className="flex items-center gap-2 ml-auto flex-shrink-0">
         {isSignedIn ? (

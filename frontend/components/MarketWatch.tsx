@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { api, ApiError, SearchResult } from "@/lib/api";
 import { useTrading } from "@/lib/trading-context";
+import { usePriceStream } from "@/lib/price-stream";
 
 export default function MarketWatch() {
   const [input, setInput] = useState("");
@@ -14,10 +15,23 @@ export default function MarketWatch() {
   const [error, setError] = useState<string | null>(null);
   const { setSelected, selectedTicker } = useTrading();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const priceAbortRef = useRef<AbortController | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Live price stream for the currently displayed ticker
+  const resolvedTicker = input.trim().toUpperCase();
+  const looksLikeTicker = /^[A-Za-z0-9\-&]+$/.test(resolvedTicker);
+  const streamTickers = looksLikeTicker && resolvedTicker ? [resolvedTicker] : [];
+  const streamPrices = usePriceStream(streamTickers);
+
+  // Apply stream updates to displayed price
+  useEffect(() => {
+    const sp = streamPrices[resolvedTicker];
+    if (sp != null) {
+      setPrice(sp.price);
+    }
+  }, [streamPrices, resolvedTicker]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -100,19 +114,6 @@ export default function MarketWatch() {
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [input]);
-
-  // Poll every 3 seconds while a ticker is displayed
-  useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    const ticker = input.trim();
-    if (!ticker || !/^[A-Za-z0-9\-&]+$/.test(ticker)) return;
-    pollRef.current = setInterval(() => {
-      fetchPrice(ticker);
-    }, 3000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [input]);
 

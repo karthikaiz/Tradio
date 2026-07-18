@@ -12,3 +12,7 @@ pytest-html
 python-dotenv
 aiosqlite
 python-jose[cryptography]
+smartapi-python
+pyotp
+logzero
+websocket-client

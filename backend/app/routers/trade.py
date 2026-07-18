@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user_id
 from app.services.market import MarketDataError
+from app.services.market_hours import get_market_status
 from app.models import TradeReason
 from app.services.trade import (
     execute_buy,
@@ -24,12 +25,22 @@ class TradeRequest(BaseModel):
     trade_reason: TradeReason | None = None
 
 
+def _assert_market_open() -> None:
+    status = get_market_status()
+    if not status["open"]:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Market closed", "reason": status["reason"], "next_open": status["next_open"]},
+        )
+
+
 @router.post("/buy")
 async def buy(
     req: TradeRequest,
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
 ):
+    _assert_market_open()
     ticker = req.ticker.upper().strip()
     try:
         result = await execute_buy(db, ticker, req.quantity, user_id, req.trade_reason)
@@ -56,6 +67,7 @@ async def sell(
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
 ):
+    _assert_market_open()
     ticker = req.ticker.upper().strip()
     try:
         result = await execute_sell(db, ticker, req.quantity, user_id, req.trade_reason)

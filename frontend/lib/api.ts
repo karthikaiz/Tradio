@@ -145,6 +145,12 @@ export interface MarketCategories {
   stable: CategoryStock[];
 }
 
+export interface MarketStatus {
+  open: boolean;
+  reason: string;
+  next_open: string | null;
+}
+
 export type UserGoal = "LEARN_BASICS" | "PRACTICE_STOCKS" | "DEVELOP_STRATEGY";
 
 export interface UserProfile {
@@ -200,6 +206,57 @@ export interface HealthScore {
   };
 }
 
+// ── Bot monitoring types ──────────────────────────────────────────────────────
+
+export interface BotStatus {
+  status: "RUNNING" | "HALTED" | "STOPPED" | "MARKET_CLOSED";
+  climate_score: number | null;
+  climate_regime: string | null;
+  circuit_breaker: "OK" | "HALTED";
+  last_heartbeat: string | null;
+  daily_pnl: number | null;
+  open_positions_count: number;
+}
+
+export interface BotPosition {
+  id: number;
+  ticker: string;
+  entry_price: number;
+  current_price: number | null;
+  stop_loss: number | null;
+  target_1: number | null;
+  target_2: number | null;
+  quantity: number;
+  pnl: number | null;
+  conviction: number | null;
+  thesis: string | null;
+  strategy: string;
+  entry_date: string | null;
+  hold_days_min: number | null;
+  hold_days_max: number | null;
+}
+
+export interface BotScanResult {
+  id: number;
+  date: string;
+  ticker: string;
+  fundamental_score: number | null;
+  tier: string | null;
+  climate_score: number | null;
+  action: "BOUGHT" | "SKIPPED" | "DISQUALIFIED";
+  skip_reason: string | null;
+  conviction: number | null;
+  llm_thesis: string | null;
+  recorded_at: string;
+}
+
+export interface BotLogEntry {
+  id: number;
+  timestamp: string;
+  level: "TRADE" | "INFO" | "WARNING" | "ERROR";
+  message: string;
+}
+
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 export const api = {
@@ -224,6 +281,9 @@ export const api = {
 
   getCategories: (signal?: AbortSignal) =>
     request<MarketCategories>("/api/market/categories", { signal }),
+
+  getMarketStatus: (signal?: AbortSignal) =>
+    request<MarketStatus>("/api/market/status", { signal }),
 
   // Auth-required endpoints
   buy: (ticker: string, quantity: number, token: string, trade_reason?: TradeReason | null) =>
@@ -285,5 +345,18 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ goal }),
     }, token),
+
+  // Bot monitoring endpoints (public, no auth required)
+  getBotStatus: (signal?: AbortSignal) =>
+    request<BotStatus>("/api/bot/status", { signal }),
+
+  getBotPositions: (signal?: AbortSignal) =>
+    request<BotPosition[]>("/api/bot/positions", { signal }),
+
+  getBotScanResults: (date = "today", signal?: AbortSignal) =>
+    request<BotScanResult[]>(`/api/bot/scan-results?date=${encodeURIComponent(date)}`, { signal }),
+
+  getBotLogs: (limit = 50, signal?: AbortSignal) =>
+    request<BotLogEntry[]>(`/api/bot/logs?limit=${limit}`, { signal }),
 
 };

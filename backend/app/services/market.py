@@ -1,13 +1,15 @@
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
-import yfinance as yf
+from datetime import datetime, timezone
+
+from app.services.angel_client import angel_session
+from app.services.instruments import get_token
 
 logger = logging.getLogger(__name__)
 
 # In-memory cache: {ticker: (price, fetched_at)}
 _cache: dict[str, tuple[float, datetime]] = {}
-CACHE_TTL_SECONDS = 30
+CACHE_TTL_SECONDS = 3
 
 
 class MarketDataError(Exception):
@@ -17,57 +19,40 @@ class MarketDataError(Exception):
         super().__init__(f"Market data unavailable for {ticker}: {reason}")
 
 
-def _fetch_price_sync(ticker_ns: str) -> float:
-    """Synchronous yfinance call — always run via run_in_executor."""
-    stock = yf.Ticker(ticker_ns)
-
-    # Primary: fast_info — single lightweight quote request, ~10x cheaper
-    # than .info (which downloads the full quote summary)
-    try:
-        price = stock.fast_info.last_price
-        if price and price > 0:
-            return float(price)
-    except Exception:
-        pass
-
-    # Fallback: full info blob
-    try:
-        price = stock.info.get("currentPrice")
-        if price and price > 0:
-            return float(price)
-    except Exception:
-        pass
-
-    # Last resort: latest closing price from history
-    hist = stock.history(period="1d")
-    if not hist.empty:
-        return float(hist["Close"].iloc[-1])
-
-    raise MarketDataError(ticker_ns, "No price data returned")
-
-
 async def get_price(ticker: str) -> float:
     """
     Returns the current INR price for a NSE ticker.
-    Appends .NS internally. Caches results for CACHE_TTL_SECONDS.
-    Raises MarketDataError on any failure.
+    Caches results for CACHE_TTL_SECONDS. Raises MarketDataError on failure.
     """
     now = datetime.now(timezone.utc)
 
-    # Check cache
     if ticker in _cache:
         cached_price, fetched_at = _cache[ticker]
-        age = (now - fetched_at).total_seconds()
-        if age < CACHE_TTL_SECONDS:
-            logger.debug(f"Cache hit for {ticker} (age {age:.1f}s)")
+        if (now - fetched_at).total_seconds() < CACHE_TTL_SECONDS:
+            logger.debug(f"Cache hit for {ticker}")
             return cached_price
 
-    ticker_ns = ticker if ticker.startswith("^") else f"{ticker}.NS"
-    logger.info(f"Fetching price for {ticker_ns} from yfinance")
+    token = await get_token(ticker)
+    if not token:
+        raise MarketDataError(ticker, "Symbol not found in instruments master")
+
+    trading_symbol = f"{ticker}-EQ"
 
     try:
+        client = await angel_session.client()
         loop = asyncio.get_event_loop()
-        price = await loop.run_in_executor(None, _fetch_price_sync, ticker_ns)
+
+        def _fetch():
+            return client.ltpData("NSE", trading_symbol, token)
+
+        resp = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch),
+            timeout=8.0,
+        )
+        if not resp.get("status"):
+            raise MarketDataError(ticker, resp.get("message", "API error"))
+
+        price = float(resp["data"]["ltp"])
     except MarketDataError:
         raise
     except Exception as e:
@@ -79,6 +64,43 @@ async def get_price(ticker: str) -> float:
     _cache[ticker] = (price, now)
     logger.info(f"Price for {ticker}: ₹{price:.2f}")
     return price
+
+
+async def get_quote(ticker: str) -> dict:
+    """
+    Returns full quote: ltp, percent_change, year_high, year_low, volume.
+    Returns empty dict on failure (non-critical — used for enrichment only).
+    """
+    token = await get_token(ticker)
+    if not token:
+        return {}
+
+    try:
+        client = await angel_session.client()
+        loop = asyncio.get_event_loop()
+
+        def _fetch():
+            return client.getMarketData("FULL", {"NSE": [token]})
+
+        resp = await loop.run_in_executor(None, _fetch)
+        if not resp.get("status"):
+            return {}
+
+        fetched = resp.get("data", {}).get("fetched", [])
+        if not fetched:
+            return {}
+
+        d = fetched[0]
+        return {
+            "ltp": d.get("ltp"),
+            "percent_change": d.get("percentChange"),
+            "year_high": d.get("52WeekHigh"),
+            "year_low": d.get("52WeekLow"),
+            "volume": d.get("tradeVolume"),
+        }
+    except Exception as e:
+        logger.warning(f"get_quote failed for {ticker}: {e}")
+        return {}
 
 
 def get_cache_info(ticker: str) -> tuple[bool, datetime | None]:

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, CategoryStock } from "@/lib/api";
+import { getTickerName } from "@/lib/ticker-names";
 import AnimatedNumber from "./ui/AnimatedNumber";
 
 type Category = "gainers" | "losers" | "active" | "stable";
@@ -142,8 +143,8 @@ export default function MarketCategories() {
                         {i + 1}
                       </td>
                       <td className="py-2 px-2">
-                        <div className="font-bold text-xs truncate" style={{ color: "var(--text)", fontFamily: "var(--font-geist-mono)" }}>{s.name}</div>
-                        <div className="text-xs tracking-wider uppercase" style={{ color: "var(--text-dim)", fontFamily: "var(--font-geist-mono)" }}>
+                        <div className="font-bold text-xs truncate" style={{ color: "var(--text)", fontFamily: "var(--font-geist-mono)" }}>{getTickerName(s.ticker) ?? s.name}</div>
+                        <div className="text-xs truncate" style={{ color: "var(--muted)", fontFamily: "var(--font-geist-mono)" }}>
                           {s.ticker}
                         </div>
                       </td>

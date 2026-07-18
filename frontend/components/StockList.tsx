@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api, PriceEntry } from "@/lib/api";
 import { useTrading } from "@/lib/trading-context";
 import { getTickerName } from "@/lib/ticker-names";
+import { usePriceStream } from "@/lib/price-stream";
 import StockRow from "./StockRow";
 
 interface StockMeta { ticker: string; name?: string }
@@ -18,33 +19,45 @@ export default function StockList({ selectedTicker }: Props) {
   const [prevPrices, setPrevPrices] = useState<Record<string, number>>({});
   const [lastUpdated, setLastUpdated] = useState("");
 
+  // One-time REST fetch for immediate display on mount / watchlist change
   const fetchPrices = useCallback(async () => {
     if (watchlist.length === 0) return;
     try {
       const data = await api.getMultiPrice(watchlist);
-      setPrices((prev) => {
-        const newPrev: Record<string, number> = { ...prevPrices };
-        Object.entries(data.prices).forEach(([t, entry]) => {
-          if (entry.price !== null && prev[t]?.price != null) {
-            newPrev[t] = prev[t].price as number;
-          }
-        });
-        setPrevPrices(newPrev);
-        return data.prices;
-      });
+      setPrices(data.prices);
       setLastUpdated(
         new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
       );
     } catch {
       // keep last prices
     }
-  }, [watchlist]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [watchlist]);
 
   useEffect(() => {
     fetchPrices();
-    const interval = setInterval(fetchPrices, 5000);
-    return () => clearInterval(interval);
   }, [fetchPrices]);
+
+  // Real-time updates via SmartWebSocket → SSE
+  const streamPrices = usePriceStream(watchlist);
+
+  useEffect(() => {
+    if (Object.keys(streamPrices).length === 0) return;
+    setPrices((prev) => {
+      const newPrev: Record<string, number> = { ...prevPrices };
+      const merged: Record<string, PriceEntry> = { ...prev };
+      Object.entries(streamPrices).forEach(([ticker, sp]) => {
+        if (prev[ticker]?.price != null) {
+          newPrev[ticker] = prev[ticker].price as number;
+        }
+        merged[ticker] = { price: sp.price, as_of: new Date().toISOString(), error: null };
+      });
+      setPrevPrices(newPrev);
+      return merged;
+    });
+    setLastUpdated(
+      new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    );
+  }, [streamPrices]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stocks: StockMeta[] = watchlist.map((t) => ({ ticker: t, name: getTickerName(t) }));
 

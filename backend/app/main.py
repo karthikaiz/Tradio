@@ -1,9 +1,30 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from app.routers import market, trade, portfolio, orders, watchlist, user, coach
+import logging
 import os
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.log_redaction import install_redaction
+from app.routers import market, trade, portfolio, orders, watchlist, user, coach, stream, bot
+
+# Scrub broker credentials (password/TOTP/tokens) from ALL log records,
+# including third-party library loggers — must run before any broker call
+install_redaction()
+
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Tradio API", version="1.0.0")
+
+
+@app.on_event("startup")
+async def _warm_angel_session():
+    """Pre-login to Angel One at startup so the first /api/portfolio request
+    doesn't block for ~16s waiting for session initialisation."""
+    try:
+        from app.services.angel_client import angel_session
+        await angel_session.client()
+        logger.info("Angel One session warmed up at startup")
+    except Exception as e:
+        logger.warning("Angel One warmup failed (non-fatal): %s", e)
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -31,6 +52,8 @@ app.include_router(orders.router)
 app.include_router(watchlist.router)
 app.include_router(user.router)
 app.include_router(coach.router)
+app.include_router(stream.router)
+app.include_router(bot.router)
 
 
 @app.get("/health")

@@ -3,3 +3,14 @@ PLAN.md
 email-template-confirm.html
 email-template-reset.html
 output
+
+# Runtime/test junk — never commit (logs can contain broker login payloads
+# echoed by third-party libraries)
+.DS_Store
+logs/
+backend/logs/
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+AlgoBot

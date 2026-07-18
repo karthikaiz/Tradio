@@ -14,8 +14,8 @@ load_dotenv()
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from app.models import Base, User, Watchlist  # noqa — registers all models on Base
-import app.models  # noqa — ensures TradeReason enum is registered
+from app.models import Base, User, Watchlist, BotStatus, BotPosition, BotScanResult, BotLog  # noqa
+import app.models  # noqa — ensures all enums are registered
 
 DEFAULT_TICKERS: list[str] = []  # no defaults — users build their own watchlist
 
@@ -47,6 +47,11 @@ async def migrate():
         await conn.execute(sa.text(
             "ALTER TABLE tradio.users ADD COLUMN IF NOT EXISTS goal VARCHAR(30)"
         ))
+
+    print("Creating bot monitoring tables if missing...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all, checkfirst=True)
+
     print("Schema up to date.")
 
     # Backfill default watchlist for users who have none

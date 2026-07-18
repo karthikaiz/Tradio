@@ -122,59 +122,59 @@ _PRICE_TTL = 3600  # 1 hour — price stats change throughout the day
 
 
 async def _get_ticker_meta(ticker: str) -> dict[str, str]:
-    """Returns {sector, name}. SECTOR_MAP for common stocks, yfinance + TTL cache for the rest."""
+    """Returns {sector, name}. SECTOR_MAP for sector; instruments master for name; yfinance fallback for unknowns."""
+    from app.services.instruments import get_name
+
     if ticker in SECTOR_MAP:
-        return {"sector": SECTOR_MAP[ticker], "name": ticker}
+        name = await get_name(ticker) or ticker
+        return {"sector": SECTOR_MAP[ticker], "name": name}
 
     cached = _stock_cache.get(ticker)
     if cached and time.time() - cached["ts"] < _CACHE_TTL:
         return cached
 
+    instruments_name = await get_name(ticker)
+
+    # yfinance still needed for sector on unknown tickers
     try:
         import yfinance as yf
         loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(None, lambda: yf.Ticker(f"{ticker}.NS").info)
         meta: dict = {
             "sector": info.get("sector") or "Other",
-            "name": info.get("longName") or info.get("shortName") or ticker,
+            "name": instruments_name or info.get("longName") or info.get("shortName") or ticker,
             "ts": time.time(),
         }
     except Exception:
-        meta = {"sector": "Other", "name": ticker, "ts": time.time()}
+        meta = {"sector": "Other", "name": instruments_name or ticker, "ts": time.time()}
 
     _stock_cache[ticker] = meta
     return meta
 
 
 async def _get_price_stats(ticker: str) -> dict:
-    """Returns day change %, 52-week range position, and volume ratio. Cached for 1 hour."""
+    """Returns day change %, 52-week range position, and volume. Cached for 1 hour. Uses SmartAPI."""
     cached = _price_cache.get(ticker)
     if cached and time.time() - cached["ts"] < _PRICE_TTL:
         return cached
 
     try:
-        import yfinance as yf
-        loop = asyncio.get_running_loop()
-        fi = await loop.run_in_executor(None, lambda: yf.Ticker(f"{ticker}.NS").fast_info)
+        from app.services.market import get_quote
+        data = await get_quote(ticker)
 
-        last_price = fi.last_price
-        prev_close = fi.previous_close
-        year_high = fi.year_high
-        year_low = fi.year_low
-        last_volume = fi.last_volume
-        avg_volume = fi.three_month_average_volume
+        ltp = data.get("ltp")
+        year_high = data.get("year_high")
+        year_low = data.get("year_low")
 
-        day_change_pct = ((last_price - prev_close) / prev_close * 100) if prev_close else None
         range_span = (year_high - year_low) if year_high and year_low else 0
-        range_pct = ((last_price - year_low) / range_span * 100) if range_span > 0 else None
-        volume_ratio = (last_volume / avg_volume) if avg_volume and avg_volume > 0 else None
+        range_pct = ((ltp - year_low) / range_span * 100) if range_span > 0 and ltp else None
 
         stats: dict = {
-            "day_change_pct": round(day_change_pct, 2) if day_change_pct is not None else None,
+            "day_change_pct": round(data["percent_change"], 2) if data.get("percent_change") is not None else None,
             "year_high": round(year_high, 2) if year_high else None,
             "year_low": round(year_low, 2) if year_low else None,
             "range_pct": round(range_pct, 0) if range_pct is not None else None,
-            "volume_ratio": round(volume_ratio, 1) if volume_ratio is not None else None,
+            "volume_ratio": None,  # SmartAPI does not provide 3-month average volume
             "ts": time.time(),
         }
     except Exception:

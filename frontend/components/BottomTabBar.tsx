@@ -28,9 +28,21 @@ const TABS = [
       </svg>
     ),
   },
+  {
+    href: "/bot",
+    label: "BOT",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="11" width="18" height="10" rx="2" />
+        <path d="M12 11V7" />
+        <circle cx="12" cy="5" r="2" />
+        <path d="M8 15h.01M16 15h.01" />
+      </svg>
+    ),
+  },
 ];
 
-const AUTH_REQUIRED = new Set(["/dashboard", "/portfolio"]);
+const AUTH_REQUIRED = new Set(["/dashboard", "/portfolio", "/bot"]);
 
 export default function BottomTabBar() {
   const pathname = usePathname();

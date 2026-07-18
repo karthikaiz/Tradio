@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint
+from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint, Text, Float, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -110,3 +110,75 @@ class Order(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="orders")
+
+
+# ── Bot monitoring tables (written by AlgoBot, read by /bot dashboard) ────────
+
+class BotStatus(Base):
+    __tablename__ = "bot_status"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="STOPPED")
+    climate_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    climate_regime: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    circuit_breaker: Mapped[str] = mapped_column(String(10), nullable=False, default="OK")
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    daily_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_positions_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class BotPosition(Base):
+    __tablename__ = "bot_positions"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    current_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_1: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    conviction: Mapped[float | None] = mapped_column(Float, nullable=True)
+    thesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="SWING")
+    entry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hold_days_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hold_days_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class BotScanResult(Base):
+    __tablename__ = "bot_scan_results"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    fundamental_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tier: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    climate_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)   # BOUGHT | SKIPPED | DISQUALIFIED
+    skip_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    conviction: Mapped[float | None] = mapped_column(Float, nullable=True)
+    llm_thesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class BotLog(Base):
+    __tablename__ = "bot_logs"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True
+    )
+    level: Mapped[str] = mapped_column(String(10), nullable=False)   # TRADE | INFO | WARNING | ERROR
+    message: Mapped[str] = mapped_column(Text, nullable=False)

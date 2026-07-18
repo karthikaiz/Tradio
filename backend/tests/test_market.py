@@ -1,7 +1,8 @@
 import logging
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, AsyncMock, MagicMock
+
 from app.services.market import get_price, get_cache_info, clear_cache, MarketDataError
 
 logger = logging.getLogger(__name__)
@@ -9,126 +10,96 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture(autouse=True)
 def reset_cache():
-    """Clear the price cache before every test."""
     clear_cache()
     yield
     clear_cache()
 
 
-def make_mock_ticker(current_price=None, history_close=None, raise_exc=None):
-    """Helper to build a mock yfinance Ticker."""
-    mock_ticker = MagicMock()
-
-    if raise_exc:
-        mock_ticker.info = MagicMock(side_effect=raise_exc)
+def make_mock_client(ltp=None, error=False):
+    mock_client = MagicMock()
+    if error:
+        mock_client.ltpData.side_effect = Exception("Connection error")
     else:
-        info = {}
-        if current_price is not None:
-            info["currentPrice"] = current_price
-        mock_ticker.info = info
-
-    if history_close is not None:
-        import pandas as pd
-        hist = pd.DataFrame({"Close": [history_close]})
-        mock_ticker.history.return_value = hist
-    else:
-        mock_ticker.history.return_value = MagicMock(empty=True)
-
-    return mock_ticker
+        mock_client.ltpData.return_value = {
+            "status": True,
+            "data": {
+                "ltp": ltp,
+                "tradingsymbol": "RELIANCE-EQ",
+                "exchange": "NSE",
+                "symboltoken": "2885",
+            },
+        }
+    return mock_client
 
 
-async def test_get_price_returns_current_price():
-    mock_ticker = make_mock_ticker(current_price=2954.50)
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.return_value = mock_ticker
+async def test_get_price_returns_ltp():
+    mock_client = make_mock_client(ltp=2954.50)
+    with patch("app.services.market.get_token", new_callable=AsyncMock, return_value="2885"), \
+         patch("app.services.market.angel_session") as mock_session:
+        mock_session.client = AsyncMock(return_value=mock_client)
         price = await get_price("RELIANCE")
 
     assert price == 2954.50
-    logger.info("Verified: get_price returns currentPrice from yfinance info")
+    logger.info("Verified: get_price returns ltp from SmartAPI")
 
 
-async def test_ns_suffix_appended():
-    mock_ticker = make_mock_ticker(current_price=3500.00)
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.return_value = mock_ticker
-        await get_price("TCS")
+async def test_get_price_raises_when_token_not_found():
+    with patch("app.services.market.get_token", new_callable=AsyncMock, return_value=None):
+        with pytest.raises(MarketDataError) as exc_info:
+            await get_price("BADTICKER")
 
-    mock_yf.Ticker.assert_called_once_with("TCS.NS")
-    logger.info("Verified: yfinance is called with 'TCS.NS' not 'TCS'")
-
-
-async def test_get_price_fallback_to_history():
-    mock_ticker = make_mock_ticker(history_close=1580.25)
-    # No currentPrice in info
-    mock_ticker.info = {}
-    import pandas as pd
-    mock_ticker.history.return_value = pd.DataFrame({"Close": [1580.25]})
-
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.return_value = mock_ticker
-        price = await get_price("INFY")
-
-    assert price == 1580.25
-    logger.info("Verified: get_price falls back to history close price when currentPrice missing")
+    assert exc_info.value.ticker == "BADTICKER"
+    logger.info("Verified: get_price raises MarketDataError when symbol not in instruments")
 
 
 async def test_get_price_caches_result():
-    mock_ticker = make_mock_ticker(current_price=2900.00)
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.return_value = mock_ticker
+    mock_client = make_mock_client(ltp=2900.00)
+    with patch("app.services.market.get_token", new_callable=AsyncMock, return_value="2885"), \
+         patch("app.services.market.angel_session") as mock_session:
+        mock_session.client = AsyncMock(return_value=mock_client)
         price1 = await get_price("RELIANCE")
-        price2 = await get_price("RELIANCE")  # second call — should use cache
+        price2 = await get_price("RELIANCE")
 
     assert price1 == price2 == 2900.00
-    assert mock_yf.Ticker.call_count == 1  # yfinance called only once
-    logger.info("Verified: second call within 60s returns cached price, yfinance called only once")
+    assert mock_client.ltpData.call_count == 1
+    logger.info("Verified: second call within TTL returns cached price, API called only once")
 
 
 async def test_get_price_cache_expires():
-    mock_ticker = make_mock_ticker(current_price=2900.00)
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.return_value = mock_ticker
+    mock_client = make_mock_client(ltp=2900.00)
+    with patch("app.services.market.get_token", new_callable=AsyncMock, return_value="2885"), \
+         patch("app.services.market.angel_session") as mock_session:
+        mock_session.client = AsyncMock(return_value=mock_client)
         await get_price("RELIANCE")
 
         # Manually expire the cache entry
-        from app.services import market as market_module
+        import app.services.market as market_module
         ticker, (price, fetched_at) = list(market_module._cache.items())[0]
         market_module._cache[ticker] = (price, fetched_at - timedelta(seconds=61))
 
-        await get_price("RELIANCE")  # should re-fetch
+        await get_price("RELIANCE")
 
-    assert mock_yf.Ticker.call_count == 2
-    logger.info("Verified: cache entry older than 60s triggers a fresh yfinance fetch")
+    assert mock_client.ltpData.call_count == 2
+    logger.info("Verified: expired cache triggers a fresh SmartAPI fetch")
 
 
-async def test_get_price_raises_market_data_error_on_exception():
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.side_effect = Exception("Connection timeout")
+async def test_get_price_raises_on_api_error():
+    mock_client = make_mock_client(error=True)
+    with patch("app.services.market.get_token", new_callable=AsyncMock, return_value="2885"), \
+         patch("app.services.market.angel_session") as mock_session:
+        mock_session.client = AsyncMock(return_value=mock_client)
         with pytest.raises(MarketDataError) as exc_info:
             await get_price("RELIANCE")
 
     assert exc_info.value.ticker == "RELIANCE"
-    logger.info("Verified: yfinance exception raises MarketDataError with correct ticker")
-
-
-async def test_get_price_raises_market_data_error_on_empty_data():
-    mock_ticker = MagicMock()
-    mock_ticker.info = {}  # no currentPrice
-    import pandas as pd
-    mock_ticker.history.return_value = pd.DataFrame()  # empty history
-
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.return_value = mock_ticker
-        with pytest.raises(MarketDataError):
-            await get_price("BADTICKER")
-
-    logger.info("Verified: empty price data raises MarketDataError — never returns 0 or None")
+    logger.info("Verified: SmartAPI exception raises MarketDataError with correct ticker")
 
 
 async def test_market_price_endpoint_200(client):
-    mock_ticker = make_mock_ticker(current_price=2954.50)
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.return_value = mock_ticker
+    mock_client = make_mock_client(ltp=2954.50)
+    with patch("app.services.market.get_token", new_callable=AsyncMock, return_value="2885"), \
+         patch("app.services.market.angel_session") as mock_session:
+        mock_session.client = AsyncMock(return_value=mock_client)
         response = await client.get("/api/market/price?ticker=RELIANCE")
 
     assert response.status_code == 200
@@ -141,12 +112,11 @@ async def test_market_price_endpoint_200(client):
 
 
 async def test_market_price_endpoint_503_on_error(client):
-    with patch("app.services.market.yf") as mock_yf:
-        mock_yf.Ticker.side_effect = Exception("Yahoo Finance blocked")
-        response = await client.get("/api/market/price?ticker=RELIANCE")
+    with patch("app.services.market.get_token", new_callable=AsyncMock, return_value=None):
+        response = await client.get("/api/market/price?ticker=BADTICKER")
 
     assert response.status_code == 503
     data = response.json()
     assert data["detail"]["error"] == "Market data unavailable"
-    assert data["detail"]["ticker"] == "RELIANCE"
-    logger.info("Verified: GET /api/market/price returns 503 when yfinance fails")
+    assert data["detail"]["ticker"] == "BADTICKER"
+    logger.info("Verified: GET /api/market/price returns 503 when symbol not found")
