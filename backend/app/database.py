@@ -26,6 +26,12 @@ def get_engine():
         database_url = os.getenv("DATABASE_URL")
         if not database_url:
             raise RuntimeError("DATABASE_URL is not set. Check your .env file.")
+        # Accept plain postgres URLs as copied from Supabase/Neon dashboards —
+        # SQLAlchemy async needs the +asyncpg driver marker.
+        if database_url.startswith("postgresql://"):
+            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
         # NullPool: one fresh connection per session, closed at the end —
         # exactly the connection behaviour that worked on Vercel (so it stays
         # compatible with Supabase's pgbouncer transaction pooler), minus the
