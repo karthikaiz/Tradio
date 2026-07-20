@@ -1,0 +1,37 @@
+name: Migrate Database (manual)
+
+# Phone-friendly one-shot DB setup: point MIGRATE_DATABASE_URL at a fresh
+# Postgres (e.g. Supabase), then trigger this from the Actions tab.
+# seed.py creates the tradio schema, all tables, and user_id=1 with the
+# starting balance; migrate.py brings the schema fully up to date.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Seed schema + tables + default user
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.MIGRATE_DATABASE_URL }}
+        run: python seed.py
+
+      - name: Run migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.MIGRATE_DATABASE_URL }}
+        run: python migrate.py
