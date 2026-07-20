@@ -1,8 +1,10 @@
 import logging
 import os
+import traceback
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.log_redaction import install_redaction
 from app.routers import market, trade, portfolio, orders, watchlist, user, coach, stream, bot
 
@@ -13,6 +15,22 @@ install_redaction()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Tradio API", version="1.0.0")
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    """Every unhandled 500 logs its full traceback and returns the exception
+    type + message in the body — so AlgoBot's Telegram alerts show the actual
+    cause instead of an opaque 'Server error 500'."""
+    logger.error(
+        "Unhandled error on %s %s\n%s",
+        request.method, request.url.path,
+        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"{type(exc).__name__}: {exc}"},
+    )
 
 
 @app.on_event("startup")
