@@ -19,10 +19,21 @@ class MarketDataError(Exception):
         super().__init__(f"Market data unavailable for {ticker}: {reason}")
 
 
+_MAX_FETCH_ATTEMPTS = 2
+_RETRY_DELAY_S = 0.5
+
+
 async def get_price(ticker: str) -> float:
     """
     Returns the current INR price for a NSE ticker.
     Caches results for CACHE_TTL_SECONDS. Raises MarketDataError on failure.
+
+    Retries once on a network-level failure (timeout, connection error).
+    Angel's LTP endpoint occasionally read-times-out for a single instrument
+    while every other ticker in the same /multi-price batch succeeds — one
+    retry clears most of these instead of leaving that ticker's price stale
+    until the next 30s poll cycle. An explicit API-level error response
+    ("status": false) is not retried — that's deterministic, not transient.
     """
     now = datetime.now(timezone.utc)
 
@@ -38,25 +49,33 @@ async def get_price(ticker: str) -> float:
 
     trading_symbol = f"{ticker}-EQ"
 
-    try:
-        client = await angel_session.client()
-        loop = asyncio.get_event_loop()
+    last_error: Exception | None = None
+    for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
+        try:
+            client = await angel_session.client()
+            loop = asyncio.get_event_loop()
 
-        def _fetch():
-            return client.ltpData("NSE", trading_symbol, token)
+            def _fetch():
+                return client.ltpData("NSE", trading_symbol, token)
 
-        resp = await asyncio.wait_for(
-            loop.run_in_executor(None, _fetch),
-            timeout=8.0,
-        )
-        if not resp.get("status"):
-            raise MarketDataError(ticker, resp.get("message", "API error"))
+            resp = await asyncio.wait_for(
+                loop.run_in_executor(None, _fetch),
+                timeout=8.0,
+            )
+            if not resp.get("status"):
+                raise MarketDataError(ticker, resp.get("message", "API error"))
 
-        price = float(resp["data"]["ltp"])
-    except MarketDataError:
-        raise
-    except Exception as e:
-        raise MarketDataError(ticker, str(e)) from e
+            price = float(resp["data"]["ltp"])
+            break
+        except MarketDataError:
+            raise
+        except Exception as e:
+            last_error = e
+            if attempt < _MAX_FETCH_ATTEMPTS:
+                logger.warning(f"get_price({ticker}) attempt {attempt} failed ({e}) — retrying")
+                await asyncio.sleep(_RETRY_DELAY_S)
+    else:
+        raise MarketDataError(ticker, str(last_error)) from last_error
 
     if price <= 0:
         raise MarketDataError(ticker, "Returned price is zero or negative")
