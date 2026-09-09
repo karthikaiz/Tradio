@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.services.angel_client import angel_session
-from app.services.instruments import get_token
+from app.services.instruments import get_token, get_tokens_batch
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,8 @@ class MarketDataError(Exception):
 
 _MAX_FETCH_ATTEMPTS = 2
 _RETRY_DELAY_S = 0.5
+_BATCH_QUOTE_LIMIT = 50   # Angel's quote endpoint caps at 50 tokens per request
+_BATCH_TIMEOUT_S = 10.0
 
 
 async def get_price(ticker: str) -> float:
@@ -83,6 +85,116 @@ async def get_price(ticker: str) -> float:
     _cache[ticker] = (price, now)
     logger.info(f"Price for {ticker}: ₹{price:.2f}")
     return price
+
+
+async def get_prices_batch(tickers: list[str]) -> tuple[dict[str, float], dict[str, str]]:
+    """
+    Fetch many tickers in ONE Angel call. Returns ({ticker: price}, {ticker: error}).
+
+    The per-ticker path (get_price) issues one blocking `requests` call per
+    symbol inside the default thread pool. Fanning that out across N holdings
+    every 30s multiplied load on Angel's API by N, and — because each call
+    occupies a pool worker for up to the 8s timeout — a slow Angel response
+    could starve the pool so later tickers timed out while merely QUEUED,
+    never reaching the network. That turned one flaky symbol into an
+    all-tickers-stale feed outage.
+
+    Angel's quote endpoint takes up to 50 tokens per request (the same call
+    /api/market/categories already uses for 30 symbols), so the whole watch
+    list costs one request, one thread, one timeout, one retry.
+    """
+    prices: dict[str, float] = {}
+    errors: dict[str, str] = {}
+    if not tickers:
+        return prices, errors
+
+    now = datetime.now(timezone.utc)
+    wanted = [t.upper() for t in tickers]
+
+    # Serve fresh cache entries without touching the network at all.
+    to_fetch: list[str] = []
+    for ticker in wanted:
+        cached = _cache.get(ticker)
+        if cached and (now - cached[1]).total_seconds() < CACHE_TTL_SECONDS:
+            prices[ticker] = cached[0]
+        else:
+            to_fetch.append(ticker)
+    if not to_fetch:
+        return prices, errors
+
+    token_map = await get_tokens_batch(to_fetch)
+    for ticker in to_fetch:
+        if ticker not in token_map:
+            errors[ticker] = "Symbol not found in instruments master"
+    resolved = {t: tok for t, tok in token_map.items() if t in set(to_fetch)}
+    if not resolved:
+        return prices, errors
+
+    ticker_by_token = {str(tok): t for t, tok in resolved.items()}
+    token_list = [str(tok) for tok in resolved.values()]
+
+    for chunk_start in range(0, len(token_list), _BATCH_QUOTE_LIMIT):
+        chunk = token_list[chunk_start:chunk_start + _BATCH_QUOTE_LIMIT]
+        fetched, reason = await _fetch_quote_chunk(chunk)
+        if reason is not None:
+            for token in chunk:
+                errors[ticker_by_token[token]] = reason
+            continue
+
+        seen: set[str] = set()
+        for row in fetched:
+            token = str(row.get("symbolToken", ""))
+            ticker = ticker_by_token.get(token)
+            if not ticker:
+                continue
+            seen.add(token)
+            ltp = row.get("ltp")
+            try:
+                price = float(ltp)
+            except (TypeError, ValueError):
+                errors[ticker] = "Quote returned no usable ltp"
+                continue
+            if price <= 0:
+                errors[ticker] = "Returned price is zero or negative"
+                continue
+            prices[ticker] = price
+            _cache[ticker] = (price, now)
+        for token in chunk:
+            if token not in seen:
+                errors[ticker_by_token[token]] = "Ticker missing from batch quote response"
+
+    if prices:
+        logger.info(f"Batch quote: {len(prices)} priced, {len(errors)} failed")
+    return prices, errors
+
+
+async def _fetch_quote_chunk(tokens: list[str]) -> tuple[list[dict], str | None]:
+    """One Angel getMarketData call, retried once. Returns (rows, error_reason)."""
+    last_error: Exception | None = None
+    for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
+        try:
+            client = await angel_session.client()
+            loop = asyncio.get_event_loop()
+
+            def _fetch():
+                return client.getMarketData("FULL", {"NSE": tokens})
+
+            resp = await asyncio.wait_for(
+                loop.run_in_executor(None, _fetch),
+                timeout=_BATCH_TIMEOUT_S,
+            )
+            if not resp.get("status"):
+                # Angel returns status:false for transient gateway failures too
+                # (502-style "invalid response from upstream server"), so this
+                # is retried rather than treated as a permanent answer.
+                raise RuntimeError(resp.get("message") or "API error")
+            return resp.get("data", {}).get("fetched", []) or [], None
+        except Exception as e:
+            last_error = e
+            if attempt < _MAX_FETCH_ATTEMPTS:
+                logger.warning(f"Batch quote attempt {attempt} failed ({e}) — retrying")
+                await asyncio.sleep(_RETRY_DELAY_S)
+    return [], str(last_error)
 
 
 async def get_quote(ticker: str) -> dict:

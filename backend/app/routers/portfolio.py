@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user_id
 from app.models import User, Portfolio, Order, OrderSide, TradeReason
-from app.services.market import get_price, MarketDataError
+from app.services.market import get_price, get_prices_batch, MarketDataError
 from app.services.trade import round_money
 
 router = APIRouter(prefix="/api", tags=["portfolio"])
@@ -31,18 +31,22 @@ async def get_portfolio(
     port_result = await db.execute(select(Portfolio).where(Portfolio.user_id == user_id))
     holdings = port_result.scalars().all()
 
-    # Fetch all prices in parallel
-    async def fetch_holding_price(holding):
-        try:
-            price = await get_price(holding.ticker_symbol)
-            return holding, price, None
-        except MarketDataError as e:
-            return holding, None, e.reason
-
-    price_results = await asyncio.gather(
-        *[fetch_holding_price(h) for h in holdings],
-        return_exceptions=True,
+    # One Angel call for every holding, not one per holding — the old
+    # per-holding fan-out multiplied API load by the number of positions and
+    # could starve the thread pool, which is how a single slow symbol took the
+    # whole price feed down. See market.get_prices_batch.
+    batch_prices, batch_errors = await get_prices_batch(
+        [h.ticker_symbol for h in holdings]
     )
+    price_results = [
+        (
+            h,
+            batch_prices.get(h.ticker_symbol.upper()),
+            None if h.ticker_symbol.upper() in batch_prices
+            else batch_errors.get(h.ticker_symbol.upper(), "No quote returned"),
+        )
+        for h in holdings
+    ]
 
     # Build holdings response
     holdings_out = []
