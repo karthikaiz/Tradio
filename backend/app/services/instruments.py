@@ -3,6 +3,8 @@ import logging
 import time
 import httpx
 
+from app.services.loop_lock import LoopLock
+
 logger = logging.getLogger(__name__)
 
 INSTRUMENTS_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
@@ -11,7 +13,7 @@ _token_map: dict[str, str] = {}   # "RELIANCE" → "2885"
 _name_map: dict[str, str] = {}    # "RELIANCE" → "Reliance Industries Ltd"
 _loaded_at: float = 0
 _CACHE_TTL = 24 * 3600
-_lock = asyncio.Lock()
+_lock = LoopLock()
 
 
 async def get_token(symbol: str) -> str | None:
@@ -38,7 +40,7 @@ async def get_tokens_batch(symbols: list[str]) -> dict[str, str]:
 async def _ensure_loaded():
     if _token_map and time.time() - _loaded_at < _CACHE_TTL:
         return
-    async with _lock:
+    async with _lock.get():
         if _token_map and time.time() - _loaded_at < _CACHE_TTL:
             return
         await _load()
