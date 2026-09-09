@@ -163,3 +163,97 @@ async def test_market_price_endpoint_503_on_error(client):
     assert data["detail"]["error"] == "Market data unavailable"
     assert data["detail"]["ticker"] == "BADTICKER"
     logger.info("Verified: GET /api/market/price returns 503 when symbol not found")
+
+
+# ── Batch quote path (root-cause fix for recurring stale-feed outages) ────────
+
+def make_batch_client(rows, status=True, error=None):
+    """Mock whose getMarketData returns Angel's FULL-mode payload shape."""
+    c = MagicMock()
+    if error:
+        c.getMarketData.side_effect = error
+    else:
+        c.getMarketData.return_value = {
+            "status": status,
+            "message": "" if status else "An invalid response was received from the upstream server",
+            "data": {"fetched": rows},
+        }
+    return c
+
+
+async def test_batch_uses_one_angel_call_for_many_tickers():
+    """The whole point: N tickers must cost ONE upstream request, not N."""
+    from app.services.market import get_prices_batch
+    client = make_batch_client([
+        {"symbolToken": "2885", "ltp": 2954.50},
+        {"symbolToken": "1234", "ltp": 812.25},
+    ])
+    with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
+               return_value={"RELIANCE": "2885", "LAURUSLABS": "1234"}), \
+         patch("app.services.market.angel_session") as sess:
+        sess.client = AsyncMock(return_value=client)
+        prices, errors = await get_prices_batch(["RELIANCE", "LAURUSLABS"])
+
+    assert prices == {"RELIANCE": 2954.50, "LAURUSLABS": 812.25}
+    assert errors == {}
+    assert client.getMarketData.call_count == 1
+
+
+async def test_batch_gateway_failure_reports_reason_for_every_ticker():
+    """A 502-style status:false must be retried, then reported per ticker —
+    this is the 'invalid response from upstream server' outage."""
+    from app.services.market import get_prices_batch
+    client = make_batch_client([], status=False)
+    with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
+               return_value={"ADANIENSOL": "111", "POWERINDIA": "222"}), \
+         patch("app.services.market.angel_session") as sess, \
+         patch("app.services.market._RETRY_DELAY_S", 0):
+        sess.client = AsyncMock(return_value=client)
+        prices, errors = await get_prices_batch(["ADANIENSOL", "POWERINDIA"])
+
+    assert prices == {}
+    assert "upstream server" in errors["ADANIENSOL"]
+    assert "upstream server" in errors["POWERINDIA"]
+    # transient gateway errors are retried, unlike a deterministic bad symbol
+    assert client.getMarketData.call_count == 2
+
+
+async def test_batch_reports_ticker_missing_from_response():
+    from app.services.market import get_prices_batch
+    client = make_batch_client([{"symbolToken": "2885", "ltp": 2954.50}])
+    with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
+               return_value={"RELIANCE": "2885", "BHARATFORG": "999"}), \
+         patch("app.services.market.angel_session") as sess:
+        sess.client = AsyncMock(return_value=client)
+        prices, errors = await get_prices_batch(["RELIANCE", "BHARATFORG"])
+
+    assert prices == {"RELIANCE": 2954.50}
+    assert "missing from batch quote response" in errors["BHARATFORG"]
+
+
+async def test_batch_flags_unknown_symbol_without_calling_angel():
+    from app.services.market import get_prices_batch
+    client = make_batch_client([])
+    with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
+               return_value={}), \
+         patch("app.services.market.angel_session") as sess:
+        sess.client = AsyncMock(return_value=client)
+        prices, errors = await get_prices_batch(["NOSUCHTICKER"])
+
+    assert prices == {}
+    assert errors["NOSUCHTICKER"] == "Symbol not found in instruments master"
+    client.getMarketData.assert_not_called()
+
+
+async def test_batch_serves_cache_without_hitting_angel():
+    from app.services.market import get_prices_batch
+    client = make_batch_client([{"symbolToken": "2885", "ltp": 2954.50}])
+    with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
+               return_value={"RELIANCE": "2885"}), \
+         patch("app.services.market.angel_session") as sess:
+        sess.client = AsyncMock(return_value=client)
+        await get_prices_batch(["RELIANCE"])
+        prices, _ = await get_prices_batch(["RELIANCE"])   # within 3s TTL
+
+    assert prices == {"RELIANCE": 2954.50}
+    assert client.getMarketData.call_count == 1

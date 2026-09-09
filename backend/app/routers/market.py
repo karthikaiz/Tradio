@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.services.angel_client import angel_session
 from app.services.instruments import get_token, get_name, get_tokens_batch
-from app.services.market import get_price, get_cache_info, MarketDataError
+from app.services.market import get_price, get_prices_batch, get_cache_info, MarketDataError
 from app.services.market_hours import get_market_status
 
 router = APIRouter(prefix="/api/market", tags=["market"])
@@ -83,20 +83,28 @@ async def get_multi_price(tickers: str = Query(..., description="Comma-separated
     if not ticker_list:
         return {"prices": {}}
 
-    async def fetch_one(ticker: str):
-        try:
-            price = await get_price(ticker)
-            is_cached, fetched_at = get_cache_info(ticker)
-            return ticker, {
+    # One Angel call for the whole list — not one per ticker. See
+    # market.get_prices_batch for why the old fan-out turned a single slow
+    # symbol into an all-tickers-stale feed outage.
+    prices, errors = await get_prices_batch(ticker_list)
+
+    out: dict[str, dict] = {}
+    for ticker in ticker_list:
+        price = prices.get(ticker)
+        if price is not None:
+            _, fetched_at = get_cache_info(ticker)
+            out[ticker] = {
                 "price": round(price, 2),
                 "as_of": fetched_at.isoformat() if fetched_at else None,
                 "error": None,
             }
-        except MarketDataError as e:
-            return ticker, {"price": None, "as_of": None, "error": e.reason}
-
-    results = await asyncio.gather(*[fetch_one(t) for t in ticker_list])
-    return {"prices": dict(results)}
+        else:
+            out[ticker] = {
+                "price": None,
+                "as_of": None,
+                "error": errors.get(ticker, "No quote returned"),
+            }
+    return {"prices": out}
 
 
 @router.get("/history")
