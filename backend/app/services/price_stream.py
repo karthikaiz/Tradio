@@ -4,6 +4,8 @@ import os
 import threading
 import time
 
+from app.services.loop_lock import LoopLock
+
 logger = logging.getLogger(__name__)
 
 _BACKOFF_INITIAL_S = 5
@@ -27,7 +29,7 @@ class PriceStream:
         self._subscribed_tokens: set[str] = set()
         self._subscribers: list[tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = []
         self._lock = threading.Lock()
-        self._start_lock: asyncio.Lock | None = None  # created lazily inside event-loop
+        self._start_lock = LoopLock()  # rebinds if the running loop changes
         self._started = False
         # health
         self._connected = False
@@ -43,9 +45,7 @@ class PriceStream:
         return self._started and self._thread is not None and self._thread.is_alive()
 
     async def ensure_started(self, client) -> None:
-        if self._start_lock is None:
-            self._start_lock = asyncio.Lock()
-        async with self._start_lock:
+        async with self._start_lock.get():
             if self._is_alive():
                 return
             # Dead or never started — respect backoff before rebuilding

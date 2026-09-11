@@ -28,13 +28,19 @@ def mock_price(price: float):
 
 
 def mock_portfolio_prices(prices: dict[str, float]):
-    """Patch get_price in portfolio router with per-ticker prices."""
-    async def _get_price(ticker):
-        if ticker not in prices:
-            from app.services.market import MarketDataError
-            raise MarketDataError(ticker, "No data")
-        return prices[ticker]
-    return patch("app.routers.portfolio.get_price", side_effect=_get_price)
+    """Patch the portfolio router's batch price fetch with per-ticker prices.
+
+    The router now resolves every holding in one Angel call via
+    get_prices_batch instead of fanning out one get_price per holding, so
+    that is the seam to patch. Tickers absent from `prices` come back as
+    per-ticker errors, mirroring a partial batch response.
+    """
+    async def _get_prices_batch(tickers):
+        wanted = [t.upper() for t in tickers]
+        found = {t: prices[t] for t in wanted if t in prices}
+        errors = {t: "No data" for t in wanted if t not in prices}
+        return found, errors
+    return patch("app.routers.portfolio.get_prices_batch", side_effect=_get_prices_batch)
 
 
 # ── PORTFOLIO TESTS ───────────────────────────────────────────────────────────

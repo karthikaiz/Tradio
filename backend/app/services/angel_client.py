@@ -5,6 +5,8 @@ import time
 import pyotp
 from SmartApi import SmartConnect
 
+from app.services.loop_lock import LoopLock
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,12 +17,12 @@ class AngelSession:
     def __init__(self):
         self._client: SmartConnect | None = None
         self._expires_at: float = 0
-        self._lock = asyncio.Lock()
+        self._lock = LoopLock()
         self._last_failure_at: float = 0
         self._last_failure_reason: str = ""
 
     async def client(self) -> SmartConnect:
-        async with self._lock:
+        async with self._lock.get():
             if self._client is None or time.time() >= self._expires_at:
                 # Every failed login used to retry on the very next price
                 # request with zero delay — every ticker in a multi-price
