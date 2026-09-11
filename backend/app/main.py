@@ -14,6 +14,9 @@ install_redaction()
 
 logger = logging.getLogger(__name__)
 
+# Matches [[vm]] memory in fly.toml — used only for the /health reading.
+MEMORY_LIMIT_MB = int(os.getenv("MEMORY_LIMIT_MB", "256"))
+
 app = FastAPI(title="Tradio API", version="1.0.0")
 
 
@@ -76,4 +79,34 @@ app.include_router(bot.router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    """Liveness plus a memory reading.
+
+    This machine has 256MB with 512MB of swap. Once resident memory passes
+    the cap the kernel swaps, and swap on shared-cpu-1x is slow enough that
+    ordinary requests blow past the caller's timeout — which reaches the bot
+    as "price feed stale" on every ticker at once, with no hint that memory
+    was the cause. Reporting RSS here turns the next such incident into a
+    measurement instead of a guess.
+    """
+    mem: dict[str, float | bool | None] = {}
+    try:
+        # /proc/self/status is cheap and needs no third-party dependency.
+        with open("/proc/self/status") as f:
+            fields = dict(
+                line.split(":", 1) for line in f if ":" in line
+            )
+        rss_mb = int(fields["VmRSS"].strip().split()[0]) / 1024
+        swap_mb = int(fields.get("VmSwap", "0 kB").strip().split()[0]) / 1024
+        mem = {
+            "rss_mb": round(rss_mb, 1),
+            "swap_mb": round(swap_mb, 1),
+            "limit_mb": MEMORY_LIMIT_MB,
+            "pct_of_limit": round(rss_mb / MEMORY_LIMIT_MB * 100, 1),
+            # Swapping at all on this machine means requests are already
+            # being served from disk-backed pages.
+            "swapping": swap_mb > 1,
+        }
+    except Exception:
+        mem = {"rss_mb": None}
+
+    return {"status": "ok", "memory": mem}

@@ -181,3 +181,37 @@ def test_load_timeout_stays_under_the_callers_budget():
     """Algobot gives a price call 45s. A 60s load here could never finish in
     time and hung every watched ticker at once with ReadTimeout."""
     assert instruments._LOAD_TIMEOUT_S < 45
+
+
+# ── memory footprint of the price-serving process ────────────────────────────
+
+def test_price_path_does_not_import_pandas_or_yfinance():
+    """The machine has a 256MB cap. Measured: the app imports at ~72MB, but
+    pandas + yfinance add ~93MB on top — and once imported they stay resident
+    for the life of the process. That pushed it into swap, and swap on
+    shared-cpu-1x is slow enough that the price feed timed out on every
+    ticker at once.
+
+    So the modules on the price path must not pull them in. Importing them
+    lazily inside a rarely-used endpoint is fine; importing them at module
+    scope anywhere here is not.
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys;"
+        "import app.routers.market, app.routers.portfolio, app.services.market;"
+        "heavy=[m for m in ('pandas','yfinance','numpy') if m in sys.modules];"
+        "print(','.join(heavy))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True, text=True, cwd=".",
+    )
+    assert out.returncode == 0, out.stderr[-500:]
+    leaked = out.stdout.strip()
+    assert not leaked, (
+        f"price-path modules import {leaked} at module scope — "
+        f"that is ~93MB resident on a 256MB machine"
+    )

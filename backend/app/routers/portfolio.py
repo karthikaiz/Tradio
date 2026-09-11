@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user_id
 from app.models import User, Portfolio, Order, OrderSide, TradeReason
-from app.services.market import get_price, get_prices_batch, MarketDataError
+from app.services.market import get_price, get_prices_batch, get_daily_closes, MarketDataError
 from app.services.trade import round_money
 
 router = APIRouter(prefix="/api", tags=["portfolio"])
@@ -228,9 +228,16 @@ async def get_portfolio_history(
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
 ):
-    """Return daily portfolio value history using actual yfinance closing prices."""
-    import yfinance as yf
+    """Return daily portfolio value history using actual daily closing prices.
 
+    Closes come from Angel's candle API, the same source /api/market/history
+    already uses. This deliberately avoids yfinance: importing it pulls in
+    pandas, and the two together measure ~93MB on a machine with a 256MB
+    cap and a ~72MB baseline. Loading them here — on an endpoint the
+    dashboard hits — pushed the process into swap, and swap on
+    shared-cpu-1x is slow enough that the price feed then timed out on
+    every ticker at once. Same data, none of that cost.
+    """
     STARTING_BALANCE = 100_000.0
 
     orders_result = await db.execute(
@@ -245,27 +252,7 @@ async def get_portfolio_history(
     end_dt = date.today() + timedelta(days=1)
     tickers = list({o.ticker_symbol for o in orders})
 
-    def fetch_histories() -> dict[str, dict[str, float]]:
-        result: dict[str, dict[str, float]] = {}
-        for ticker in tickers:
-            ticker_ns = ticker if ticker.startswith("^") else f"{ticker}.NS"
-            try:
-                hist = yf.Ticker(ticker_ns).history(
-                    start=first_dt.isoformat(),
-                    end=end_dt.isoformat(),
-                    auto_adjust=True,
-                )
-                result[ticker] = {}
-                for ts, row in hist.iterrows():
-                    close = row.get("Close")
-                    if close is not None and not math.isnan(float(close)) and float(close) > 0:
-                        result[ticker][str(ts.date())] = float(close)
-            except Exception:
-                result[ticker] = {}
-        return result
-
-    loop = asyncio.get_event_loop()
-    price_history = await loop.run_in_executor(None, fetch_histories)
+    price_history = await get_daily_closes(tickers, first_dt, end_dt)
 
     # Group orders by date string
     orders_by_date: dict[str, list] = defaultdict(list)
