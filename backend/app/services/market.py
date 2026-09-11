@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from app.services.angel_client import angel_session
 from app.services.instruments import get_token, get_tokens_batch
@@ -195,6 +195,64 @@ async def _fetch_quote_chunk(tokens: list[str]) -> tuple[list[dict], str | None]
                 logger.warning(f"Batch quote attempt {attempt} failed ({e}) — retrying")
                 await asyncio.sleep(_RETRY_DELAY_S)
     return [], str(last_error)
+
+
+async def get_daily_closes(
+    tickers: list[str], start: date, end: date
+) -> dict[str, dict[str, float]]:
+    """Daily closes per ticker: {ticker: {"YYYY-MM-DD": close}}.
+
+    Backs the portfolio history chart off Angel's candle API — the same
+    source /api/market/history uses — so the backend does not need yfinance
+    (and therefore pandas) resident. A ticker that fails resolves to an empty
+    dict rather than failing the whole chart.
+    """
+    out: dict[str, dict[str, float]] = {t: {} for t in tickers}
+    if not tickers:
+        return out
+
+    token_map = await get_tokens_batch(tickers)
+    fmt = "%Y-%m-%d %H:%M"
+    from_s = datetime(start.year, start.month, start.day, 9, 15).strftime(fmt)
+    to_s = datetime(end.year, end.month, end.day, 15, 30).strftime(fmt)
+
+    for ticker in tickers:
+        token = token_map.get(ticker.upper())
+        if not token:
+            continue
+        try:
+            client = await angel_session.client()
+            loop = asyncio.get_event_loop()
+
+            def _fetch(tok=token):
+                return client.getCandleData({
+                    "exchange": "NSE",
+                    "symboltoken": tok,
+                    "interval": "ONE_DAY",
+                    "fromdate": from_s,
+                    "todate": to_s,
+                })
+
+            resp = await asyncio.wait_for(
+                loop.run_in_executor(None, _fetch), timeout=_BATCH_TIMEOUT_S
+            )
+            if not resp.get("status"):
+                logger.warning("Candle fetch for %s: %s", ticker, resp.get("message"))
+                continue
+            closes: dict[str, float] = {}
+            for row in resp.get("data") or []:
+                # row: [timestamp, open, high, low, close, volume]
+                try:
+                    close = float(row[4])
+                except (IndexError, TypeError, ValueError):
+                    continue
+                if close > 0:
+                    closes[str(row[0])[:10]] = close
+            out[ticker] = closes
+        except Exception as e:
+            logger.warning("Candle fetch failed for %s: %s", ticker, e)
+
+    return out
 
 
 async def get_quote(ticker: str) -> dict:
