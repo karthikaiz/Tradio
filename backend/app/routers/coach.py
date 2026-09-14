@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user_id
 from app.models import User
+from app.services.fundamentals import get_fundamentals
 
 router = APIRouter(prefix="/api/coach", tags=["coach"])
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ WHAT YOU RECEIVE:
 - Full portfolio snapshot: every holding with its name, sector, quantity, average buy price, current price, unrealised P&L
 - The new trade the user is about to execute (BUY or SELL)
 - Live price stats: today's move, 52-week range position, volume vs average
-- Real fundamentals: EPS growth, revenue growth, P/E, ROE, debt/equity, recent news headlines
+- Real fundamentals: EPS growth, revenue growth, P/E, ROE, debt/equity
 - The reason the user gave for this trade
 
 YOUR ANALYSIS PROCESS (do this silently before writing):
@@ -122,7 +123,15 @@ _PRICE_TTL = 3600  # 1 hour — price stats change throughout the day
 
 
 async def _get_ticker_meta(ticker: str) -> dict[str, str]:
-    """Returns {sector, name}. SECTOR_MAP for sector; instruments master for name; yfinance fallback for unknowns."""
+    """Returns {sector, name}. SECTOR_MAP for sector, instruments master for name.
+
+    Sector for names outside SECTOR_MAP used to come from yfinance. That
+    import costs ~93MB alongside pandas on a 256MB machine, which is what
+    starved the price feed — far too much to spend on one label that already
+    had an "Other" fallback. Neither Angel nor Screener publishes a sector,
+    so unknown tickers now simply resolve to "Other"; extend SECTOR_MAP to
+    classify one properly.
+    """
     from app.services.instruments import get_name
 
     if ticker in SECTOR_MAP:
@@ -133,21 +142,11 @@ async def _get_ticker_meta(ticker: str) -> dict[str, str]:
     if cached and time.time() - cached["ts"] < _CACHE_TTL:
         return cached
 
-    instruments_name = await get_name(ticker)
-
-    # yfinance still needed for sector on unknown tickers
-    try:
-        import yfinance as yf
-        loop = asyncio.get_running_loop()
-        info = await loop.run_in_executor(None, lambda: yf.Ticker(f"{ticker}.NS").info)
-        meta: dict = {
-            "sector": info.get("sector") or "Other",
-            "name": instruments_name or info.get("longName") or info.get("shortName") or ticker,
-            "ts": time.time(),
-        }
-    except Exception:
-        meta = {"sector": "Other", "name": instruments_name or ticker, "ts": time.time()}
-
+    meta = {
+        "sector": "Other",
+        "name": await get_name(ticker) or ticker,
+        "ts": time.time(),
+    }
     _stock_cache[ticker] = meta
     return meta
 
@@ -188,49 +187,23 @@ _fundamentals_cache: dict[str, dict] = {}
 _FUNDAMENTALS_TTL = 24 * 3600  # 24 hours — earnings data changes quarterly
 
 
-def _format_news_age(ts: int) -> str:
-    diff = time.time() - ts
-    if diff < 3600:
-        return f"{int(diff/60)}m ago"
-    if diff < 86400:
-        return f"{int(diff/3600)}h ago"
-    return f"{int(diff/86400)}d ago"
-
-
 async def _get_fundamentals(ticker: str) -> dict:
-    """Returns earnings growth, revenue growth, margins, P/E, and recent news. Cached 24h."""
+    """Returns earnings growth, revenue growth, margins, P/E and ROE. Cached 24h.
+
+    The rendering below still understands a "news" list so a future headline
+    source can be dropped in, but Screener publishes none, so it stays empty.
+    """
     cached = _fundamentals_cache.get(ticker)
     if cached and time.time() - cached["ts"] < _FUNDAMENTALS_TTL:
         return cached
 
-    try:
-        import yfinance as yf
-        loop = asyncio.get_running_loop()
-        t = yf.Ticker(f"{ticker}.NS")
-
-        info, raw_news = await asyncio.gather(
-            loop.run_in_executor(None, lambda: t.info),
-            loop.run_in_executor(None, lambda: t.news),
-        )
-
-        news = [
-            {"title": n["title"], "age": _format_news_age(n.get("providerPublishTime", 0))}
-            for n in (raw_news or [])[:5]
-            if n.get("title")
-        ]
-
-        result: dict = {
-            "eps_growth": info.get("earningsQuarterlyGrowth"),   # quarterly YoY
-            "revenue_growth": info.get("revenueQuarterlyGrowth"),
-            "profit_margin": info.get("profitMargins"),
-            "roe": info.get("returnOnEquity"),
-            "pe_ratio": info.get("trailingPE"),
-            "debt_to_equity": info.get("debtToEquity"),
-            "news": news,
-            "ts": time.time(),
-        }
-    except Exception:
-        result = {"news": [], "ts": time.time()}
+    # Sourced from the Screener.in snapshots Algobot writes to Supabase every
+    # trading day — see app/services/fundamentals.py for why not yfinance
+    # (~93MB with pandas, on a 256MB machine) and why not Angel (its API
+    # carries no fundamentals at all). Same field shape as before, so the
+    # prompt builder is unchanged; only news is gone, as Screener has none.
+    result = await get_fundamentals(ticker)
+    result["ts"] = time.time()
 
     _fundamentals_cache[ticker] = result
     return result

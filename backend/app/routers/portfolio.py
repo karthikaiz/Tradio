@@ -259,7 +259,7 @@ async def get_portfolio_history(
     for o in orders:
         orders_by_date[str(o.timestamp.date())].append(o)
 
-    # Collect all trading dates that yfinance returned across any ticker
+    # Collect all trading dates returned across any ticker
     all_dates = sorted({
         d
         for prices in price_history.values()
