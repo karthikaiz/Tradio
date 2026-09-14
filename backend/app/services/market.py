@@ -19,10 +19,37 @@ class MarketDataError(Exception):
         super().__init__(f"Market data unavailable for {ticker}: {reason}")
 
 
+# ── Timeout budget ────────────────────────────────────────────────────────────
+#
+# The bot's price poll gives this service CLIENT_BUDGET_S and then abandons
+# the request. Anything this service does must provably finish inside that,
+# retries included — otherwise the client times out first and gets a bare
+# httpx ReadTimeout carrying no reason at all, while the server is still
+# working. That is not hypothetical: _BATCH_TIMEOUT_S was 10s with 2
+# attempts and a 0.5s delay = 20.5s worst case against a 20.0s client
+# budget, so every slow-Angel episode timed out the client by construction.
+#
+# The relationship is asserted in tests. Change one number and the test
+# tells you which other numbers no longer fit.
+CLIENT_BUDGET_S = 20.0          # what Algobot allows (tradio_client _timeout)
 _MAX_FETCH_ATTEMPTS = 2
 _RETRY_DELAY_S = 0.5
 _BATCH_QUOTE_LIMIT = 50   # Angel's quote endpoint caps at 50 tokens per request
-_BATCH_TIMEOUT_S = 10.0
+# 7s per attempt matches Angel's own ~7s internal read timeout, so a call
+# is abandoned only once Angel itself would have given up.
+# 7*2 + 0.5 = 14.5s worst case.
+_BATCH_TIMEOUT_S = 7.0
+
+# Hard ceiling on the whole batch, enforced by the endpoint. Returning a
+# JSON error at 15s is strictly better than letting the client hit 20s: the
+# client learns nothing from its own timeout, but a response carries the
+# reason for every ticker.
+BATCH_DEADLINE_S = 16.0
+
+
+def _worst_case_fetch_s(per_attempt: float = _BATCH_TIMEOUT_S) -> float:
+    """Longest one chunk can take: every attempt times out, plus the delays."""
+    return per_attempt * _MAX_FETCH_ATTEMPTS + _RETRY_DELAY_S * (_MAX_FETCH_ATTEMPTS - 1)
 
 
 async def get_price(ticker: str) -> float:
