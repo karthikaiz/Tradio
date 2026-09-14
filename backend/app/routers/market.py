@@ -6,7 +6,10 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.services.angel_client import angel_session
 from app.services.instruments import get_token, get_name, get_tokens_batch
-from app.services.market import get_price, get_prices_batch, get_cache_info, MarketDataError
+from app.services.market import (
+    get_price, get_prices_batch, get_cache_info, MarketDataError,
+    BATCH_DEADLINE_S,
+)
 from app.services.market_hours import get_market_status
 
 router = APIRouter(prefix="/api/market", tags=["market"])
@@ -86,7 +89,25 @@ async def get_multi_price(tickers: str = Query(..., description="Comma-separated
     # One Angel call for the whole list — not one per ticker. See
     # market.get_prices_batch for why the old fan-out turned a single slow
     # symbol into an all-tickers-stale feed outage.
-    prices, errors = await get_prices_batch(ticker_list)
+    #
+    # Hard deadline: the caller abandons this request at CLIENT_BUDGET_S and
+    # is left with a bare ReadTimeout that names no cause. Answering at
+    # BATCH_DEADLINE_S with a per-ticker reason is always more useful than
+    # being cut off, so the endpoint must never outlive the caller.
+    try:
+        prices, errors = await asyncio.wait_for(
+            get_prices_batch(ticker_list), timeout=BATCH_DEADLINE_S
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "multi-price exceeded its %.0fs deadline for %d ticker(s) — "
+            "answering with an explicit reason rather than letting the caller time out",
+            BATCH_DEADLINE_S, len(ticker_list),
+        )
+        prices, errors = {}, {
+            t: f"Upstream quote exceeded the {BATCH_DEADLINE_S:.0f}s server deadline"
+            for t in ticker_list
+        }
 
     out: dict[str, dict] = {}
     for ticker in ticker_list:

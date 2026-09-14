@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import pytest
 from datetime import datetime, timezone, timedelta
@@ -257,3 +258,65 @@ async def test_batch_serves_cache_without_hitting_angel():
 
     assert prices == {"RELIANCE": 2954.50}
     assert client.getMarketData.call_count == 1
+
+
+# ── timeout budget (the bug that caused the 14 Sep outage) ───────────────────
+
+def test_server_worst_case_fits_inside_the_client_budget():
+    """The failure this encodes, verbatim from the alert:
+
+        GET /api/market/multi-price (timeout=20s) failed after 20.0s
+
+    _BATCH_TIMEOUT_S was 10s with 2 attempts and a 0.5s delay = 20.5s worst
+    case, against a 20.0s client budget. The client therefore abandoned the
+    request half a second before the server could possibly answer — every
+    time Angel was slow enough to burn both attempts. Not intermittent: a
+    certainty, by arithmetic.
+
+    The same shape had already been fixed once in instruments.py (60s load
+    vs a 45s caller) and was then recreated here, so it is asserted rather
+    than left to review.
+    """
+    from app.services import market
+
+    worst = market._worst_case_fetch_s()
+    assert worst < market.BATCH_DEADLINE_S, (
+        f"one chunk can take {worst}s but the endpoint cuts off at "
+        f"{market.BATCH_DEADLINE_S}s"
+    )
+    assert market.BATCH_DEADLINE_S < market.CLIENT_BUDGET_S, (
+        f"server deadline {market.BATCH_DEADLINE_S}s must land before the "
+        f"client gives up at {market.CLIENT_BUDGET_S}s, or the client learns "
+        f"nothing about why"
+    )
+
+
+def test_single_ticker_path_also_fits_the_budget():
+    """get_price backs /api/market/price and the order path; it retries too."""
+    from app.services import market
+
+    worst = market._worst_case_fetch_s(per_attempt=8.0)   # get_price's timeout
+    assert worst < market.CLIENT_BUDGET_S
+
+
+async def test_multi_price_answers_with_a_reason_instead_of_hanging():
+    """Being cut off tells the caller nothing. Exceeding the deadline must
+    still produce a per-ticker reason."""
+    from app.services import market
+
+    async def _hang(_tickers):
+        await asyncio.sleep(5)
+
+    with patch("app.routers.market.get_prices_batch", side_effect=_hang), \
+         patch("app.routers.market.BATCH_DEADLINE_S", 0.05):
+        from httpx import ASGITransport, AsyncClient
+        from app.main import app
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/market/multi-price?tickers=ADANIENSOL,LAURUSLABS")
+
+    assert resp.status_code == 200
+    prices = resp.json()["prices"]
+    assert set(prices) == {"ADANIENSOL", "LAURUSLABS"}
+    for row in prices.values():
+        assert row["price"] is None
+        assert "server deadline" in row["error"]
