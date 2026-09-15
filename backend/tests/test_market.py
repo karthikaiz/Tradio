@@ -280,6 +280,11 @@ def test_server_worst_case_fits_inside_the_client_budget():
     from app.services import market
 
     worst = market._worst_case_fetch_s()
+    # The session wait counts. It sits outside the per-attempt timeout, so
+    # leaving it out of this sum is precisely how a 20s login got onto a path
+    # budgeted at 16s while this test stayed green.
+    assert market._SESSION_WAIT_S > 0
+    assert worst >= market._SESSION_WAIT_S, "session wait must be in the budget"
     assert worst < market.BATCH_DEADLINE_S, (
         f"one chunk can take {worst}s but the endpoint cuts off at "
         f"{market.BATCH_DEADLINE_S}s"
@@ -375,3 +380,38 @@ def test_only_the_most_recent_requests_are_kept():
     kept = market.recent_price_timings()
     assert len(kept) == 5
     assert kept[0]["tickers"] == 11   # newest first
+
+
+def test_a_login_can_never_outlast_the_endpoint_budget():
+    """Obtaining the session may trigger a login bounded at _LOGIN_TIMEOUT_S.
+    A price request must not be able to wait that long: 20s against an 18s
+    deadline is what produced "Upstream quote exceeded the server deadline"
+    while the app was perfectly healthy."""
+    from app.services import market
+    from app.services import angel_client
+
+    assert market._SESSION_WAIT_S < market.BATCH_DEADLINE_S
+    assert market._SESSION_WAIT_S < angel_client._LOGIN_TIMEOUT_S, (
+        "the price path should give up well before the login does — the "
+        "background warmup owns the login, not the poll"
+    )
+
+
+async def test_session_not_ready_fails_fast_with_a_clear_reason():
+    """Rather than waiting out a login and blowing the budget, the poll says
+    what happened and lets the next one (30s later) find the session."""
+    from app.services import market
+
+    async def _slow_session():
+        await asyncio.sleep(5)
+
+    with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
+               return_value={"RELIANCE": "2885"}), \
+         patch("app.services.market.angel_session") as sess, \
+         patch("app.services.market._SESSION_WAIT_S", 0.05), \
+         patch("app.services.market._RETRY_DELAY_S", 0):
+        sess.client = _slow_session
+        prices, errors = await market.get_prices_batch(["RELIANCE"])
+
+    assert prices == {}
+    assert "session not ready" in errors["RELIANCE"]

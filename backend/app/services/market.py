@@ -42,16 +42,38 @@ _BATCH_QUOTE_LIMIT = 50   # Angel's quote endpoint caps at 50 tokens per request
 # 7*2 + 0.5 = 14.5s worst case.
 _BATCH_TIMEOUT_S = 7.0
 
-# Hard ceiling on the whole batch, enforced by the endpoint. Returning a
-# JSON error at 15s is strictly better than letting the client hit 20s: the
-# client learns nothing from its own timeout, but a response carries the
-# reason for every ticker.
-BATCH_DEADLINE_S = 16.0
+# How long a price request may wait to obtain the Angel session.
+#
+# Acquiring the session can trigger a login, which is bounded at
+# _LOGIN_TIMEOUT_S (20s) — longer than this whole endpoint is allowed to
+# take. That is how "Upstream quote exceeded the 16s server deadline"
+# happened with the app healthy: the wait for the session sat OUTSIDE the
+# per-attempt timeout and counted toward no budget at all.
+#
+# A price poll must not pay for a login. The startup warmup establishes the
+# session in the background, so if it is not ready yet this poll fails fast
+# with a clear reason and the next one (30s later) finds it there.
+_SESSION_WAIT_S = 3.0
+
+# Hard ceiling on the whole batch, enforced by the endpoint. Answering here
+# is strictly better than letting the client hit its own timeout: the client
+# learns nothing from that, but a response carries the reason per ticker.
+BATCH_DEADLINE_S = 18.0
 
 
 def _worst_case_fetch_s(per_attempt: float = _BATCH_TIMEOUT_S) -> float:
-    """Longest one chunk can take: every attempt times out, plus the delays."""
-    return per_attempt * _MAX_FETCH_ATTEMPTS + _RETRY_DELAY_S * (_MAX_FETCH_ATTEMPTS - 1)
+    """Longest one chunk can take, INCLUDING the wait for the session.
+
+    The session wait is the part that kept being left out — of the budget and
+    of the test that was supposed to guard it. Every await on this path has to
+    be counted, not just the one that happens to be wrapped in a timeout.
+    """
+    attempts = _MAX_FETCH_ATTEMPTS
+    return (
+        _SESSION_WAIT_S                      # obtaining the Angel session
+        + per_attempt * attempts             # the quote calls themselves
+        + _RETRY_DELAY_S * (attempts - 1)    # the gap between retries
+    )
 
 
 # ── Where the time actually goes ──────────────────────────────────────────────
@@ -241,7 +263,18 @@ async def _fetch_quote_chunk(tokens: list[str]) -> tuple[list[dict], str | None]
     last_error: Exception | None = None
     for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
         try:
-            client = await angel_session.client()
+            # Bounded: a price poll must never pay for an Angel login. The
+            # background warmup owns that; if the session is not ready this
+            # poll gives up quickly rather than blowing the endpoint's budget.
+            try:
+                client = await asyncio.wait_for(
+                    angel_session.client(), timeout=_SESSION_WAIT_S
+                )
+            except asyncio.TimeoutError:
+                raise RuntimeError(
+                    f"Angel session not ready within {_SESSION_WAIT_S:.0f}s "
+                    f"(still logging in) — skipping this poll"
+                ) from None
             loop = asyncio.get_event_loop()
 
             def _fetch():
