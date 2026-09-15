@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import time
+from collections import deque
 from datetime import date, datetime, timezone
 
 from app.services.angel_client import angel_session
@@ -50,6 +52,29 @@ BATCH_DEADLINE_S = 16.0
 def _worst_case_fetch_s(per_attempt: float = _BATCH_TIMEOUT_S) -> float:
     """Longest one chunk can take: every attempt times out, plus the delays."""
     return per_attempt * _MAX_FETCH_ATTEMPTS + _RETRY_DELAY_S * (_MAX_FETCH_ATTEMPTS - 1)
+
+
+# ── Where the time actually goes ──────────────────────────────────────────────
+#
+# Client-side timing can only say "the call took 20s". It cannot say which
+# stage consumed it, and guessing at that from the outside has been wrong
+# repeatedly. These record the real split per request and /health reports
+# them, so the bot's failure alert carries the server's own view instead of
+# an inference.
+_recent_timings: deque[dict] = deque(maxlen=5)
+
+
+def record_price_timing(**stages: float) -> None:
+    stages["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _recent_timings.append({
+        k: (round(v, 2) if isinstance(v, (int, float)) else v)
+        for k, v in stages.items()
+    })
+
+
+def recent_price_timings() -> list[dict]:
+    """Stage timings for the last few price requests, newest first."""
+    return list(reversed(_recent_timings))
 
 
 async def get_price(ticker: str) -> float:
@@ -149,7 +174,9 @@ async def get_prices_batch(tickers: list[str]) -> tuple[dict[str, float], dict[s
     if not to_fetch:
         return prices, errors
 
+    t_start = time.monotonic()
     token_map = await get_tokens_batch(to_fetch)
+    t_tokens = time.monotonic() - t_start
     for ticker in to_fetch:
         if ticker not in token_map:
             errors[ticker] = "Symbol not found in instruments master"
@@ -190,6 +217,20 @@ async def get_prices_batch(tickers: list[str]) -> tuple[dict[str, float], dict[s
             if token not in seen:
                 errors[ticker_by_token[token]] = "Ticker missing from batch quote response"
 
+    total = time.monotonic() - t_start
+    record_price_timing(
+        tickers=len(to_fetch),
+        tokens_s=t_tokens,          # instruments master resolution
+        quote_s=total - t_tokens,   # Angel session + getMarketData
+        total_s=total,
+        priced=len(prices),
+        failed=len(errors),
+    )
+    if total > _BATCH_TIMEOUT_S:
+        logger.warning(
+            "Slow batch quote: %.1fs total (tokens %.1fs, quote %.1fs) "
+            "for %d ticker(s)", total, t_tokens, total - t_tokens, len(to_fetch),
+        )
     if prices:
         logger.info(f"Batch quote: {len(prices)} priced, {len(errors)} failed")
     return prices, errors
