@@ -131,4 +131,14 @@ async def health_check():
     except Exception:
         mem = {"rss_mb": None}
 
-    return {"status": "ok", "memory": mem}
+    # Stage split for the last few price requests. The bot probes /health
+    # whenever a price call fails, so its alert carries the server's own
+    # account of where the time went rather than an inference drawn from a
+    # client-side timeout — which has been wrong repeatedly.
+    try:
+        from app.services.market import recent_price_timings
+        timings = recent_price_timings()
+    except Exception:
+        timings = []
+
+    return {"status": "ok", "memory": mem, "recent_price_timings": timings}

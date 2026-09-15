@@ -280,6 +280,11 @@ def test_server_worst_case_fits_inside_the_client_budget():
     from app.services import market
 
     worst = market._worst_case_fetch_s()
+    # The session wait counts. It sits outside the per-attempt timeout, so
+    # leaving it out of this sum is precisely how a 20s login got onto a path
+    # budgeted at 16s while this test stayed green.
+    assert market._SESSION_WAIT_S > 0
+    assert worst >= market._SESSION_WAIT_S, "session wait must be in the budget"
     assert worst < market.BATCH_DEADLINE_S, (
         f"one chunk can take {worst}s but the endpoint cuts off at "
         f"{market.BATCH_DEADLINE_S}s"
@@ -320,3 +325,93 @@ async def test_multi_price_answers_with_a_reason_instead_of_hanging():
     for row in prices.values():
         assert row["price"] is None
         assert "server deadline" in row["error"]
+
+
+# ── server-side stage timing ─────────────────────────────────────────────────
+
+async def test_batch_records_where_the_time_went():
+    """Client-side timing can only say the call took 20s. It cannot say which
+    stage consumed it, and guessing that from outside has been wrong
+    repeatedly — so the server records its own split."""
+    from app.services import market
+
+    market._recent_timings.clear()
+    client = make_batch_client([{"symbolToken": "2885", "ltp": 2954.50}])
+    with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
+               return_value={"RELIANCE": "2885"}), \
+         patch("app.services.market.angel_session") as sess:
+        sess.client = AsyncMock(return_value=client)
+        await market.get_prices_batch(["RELIANCE"])
+
+    recorded = market.recent_price_timings()
+    assert len(recorded) == 1
+    entry = recorded[0]
+    assert entry["tickers"] == 1
+    assert entry["priced"] == 1
+    assert entry["failed"] == 0
+    # The split must add up, so the alert can name the slow stage.
+    assert entry["tokens_s"] + entry["quote_s"] == pytest.approx(entry["total_s"], abs=0.05)
+    assert "at" in entry
+
+
+async def test_health_exposes_the_timings(client):
+    """The bot probes /health on a price failure, so the split has to ride
+    out on that response."""
+    from app.services import market
+
+    market._recent_timings.clear()
+    market.record_price_timing(tickers=4, tokens_s=0.01, quote_s=14.4,
+                               total_s=14.41, priced=0, failed=4)
+
+    resp = await client.get("/health")
+    assert resp.status_code == 200
+    timings = resp.json()["recent_price_timings"]
+    assert timings[0]["quote_s"] == 14.4
+    assert timings[0]["failed"] == 4
+
+
+def test_only_the_most_recent_requests_are_kept():
+    """A ring buffer — this is diagnostics, not a metrics store."""
+    from app.services import market
+
+    market._recent_timings.clear()
+    for i in range(12):
+        market.record_price_timing(tickers=i, total_s=float(i))
+    kept = market.recent_price_timings()
+    assert len(kept) == 5
+    assert kept[0]["tickers"] == 11   # newest first
+
+
+def test_a_login_can_never_outlast_the_endpoint_budget():
+    """Obtaining the session may trigger a login bounded at _LOGIN_TIMEOUT_S.
+    A price request must not be able to wait that long: 20s against an 18s
+    deadline is what produced "Upstream quote exceeded the server deadline"
+    while the app was perfectly healthy."""
+    from app.services import market
+    from app.services import angel_client
+
+    assert market._SESSION_WAIT_S < market.BATCH_DEADLINE_S
+    assert market._SESSION_WAIT_S < angel_client._LOGIN_TIMEOUT_S, (
+        "the price path should give up well before the login does — the "
+        "background warmup owns the login, not the poll"
+    )
+
+
+async def test_session_not_ready_fails_fast_with_a_clear_reason():
+    """Rather than waiting out a login and blowing the budget, the poll says
+    what happened and lets the next one (30s later) find the session."""
+    from app.services import market
+
+    async def _slow_session():
+        await asyncio.sleep(5)
+
+    with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
+               return_value={"RELIANCE": "2885"}), \
+         patch("app.services.market.angel_session") as sess, \
+         patch("app.services.market._SESSION_WAIT_S", 0.05), \
+         patch("app.services.market._RETRY_DELAY_S", 0):
+        sess.client = _slow_session
+        prices, errors = await market.get_prices_batch(["RELIANCE"])
+
+    assert prices == {}
+    assert "session not ready" in errors["RELIANCE"]
