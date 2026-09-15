@@ -5,7 +5,9 @@ from collections import deque
 from datetime import date, datetime, timezone
 
 from app.services.angel_client import angel_session
-from app.services.instruments import get_token, get_tokens_batch, is_ready as instruments_ready
+from app.services.instruments import (
+    get_token, get_tokens_batch, is_ready as instruments_ready, load_status as instruments_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -229,9 +231,14 @@ async def get_prices_batch(
     # "Not found" and "not loaded yet" are completely different faults and
     # used to be reported with the same words, which made a cold start read
     # as a bad ticker.
+    # When the master has not loaded, say what is ACTUALLY happening. This
+    # used to promise "still loading — next one will find it", which was
+    # false whenever the load was failing permanently: the same sentence was
+    # repeated every 30s for twenty minutes while withholding the one thing
+    # that would have explained it.
     missing_reason = (
         "Symbol not found in instruments master" if instruments_ready()
-        else "Instruments master still loading — this poll skipped, next one will find it"
+        else f"Instruments master unavailable: {instruments_status()}"
     )
     for ticker in to_fetch:
         if ticker not in token_map:

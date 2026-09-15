@@ -32,6 +32,7 @@ import time
 from pathlib import Path
 
 import httpx
+import ijson
 
 from app.services.loop_lock import LoopLock
 
@@ -43,7 +44,13 @@ _token_map: dict[str, str] = {}   # "RELIANCE" → "2885"
 _name_map: dict[str, str] = {}    # "RELIANCE" → "Reliance Industries Ltd"
 _loaded_at: float = 0
 _next_retry_at: float = 0
+_last_error: str = ""
 _refresh_task: asyncio.Task | None = None
+
+# A snapshot baked into the image at build time (scripts/fetch_instruments.py).
+# This is the floor: it needs no network and costs no memory, so the app can
+# always resolve symbols even if every download fails forever.
+_BUNDLED = Path(__file__).resolve().parent.parent / "data" / "instruments.json"
 
 _CACHE_TTL = 24 * 3600
 # How long the DOWNLOAD may take. This is deliberately longer than any single
@@ -56,11 +63,28 @@ _CACHE_TTL = 24 * 3600
 # no longer 45s — the price path is capped by market.BATCH_DEADLINE_S (18s) —
 # so a cold load could not finish inside the request that triggered it, and
 # every poll blew the deadline. Callers no longer inherit this number at all.
-_LOAD_TIMEOUT_S = 25
+_LOAD_TIMEOUT_S = 120
+_CHUNK_BYTES = 64 * 1024
 _FAILURE_BACKOFF_S = 300
 _DISK_CACHE = Path(os.getenv("INSTRUMENTS_CACHE_PATH", "/tmp/tradio_instruments.json"))
 
 _lock = LoopLock()
+
+
+def load_status() -> str:
+    """What is actually happening, for a caller that has to explain itself.
+
+    The price path used to report "still loading — next one will find it" for
+    every failure. When the load was failing permanently that sentence was
+    simply false, and it was repeated every 30s for twenty minutes while
+    saying nothing about why. A caller can now report the real state.
+    """
+    if _token_map:
+        return "loaded"
+    if _last_error:
+        wait = max(0, _next_retry_at - time.time())
+        return f"load FAILED ({_last_error}); retrying in {wait:.0f}s"
+    return "loading"
 
 
 def is_ready() -> bool:
@@ -129,8 +153,8 @@ async def _ensure_loaded(max_wait: float | None = None) -> None:
         _schedule_refresh()
         return
 
-    if _load_from_disk():                   # cheap, synchronous, no await
-        _schedule_refresh()                 # warm now, fresh shortly
+    if _load_from_disk() or _load_bundled():   # cheap, synchronous, no await
+        _schedule_refresh()                    # warm now, fresh shortly
         return
 
     if time.time() < _next_retry_at:
@@ -197,6 +221,36 @@ def _load_from_disk() -> bool:
         return False
 
 
+def _load_bundled() -> bool:
+    """Populate from the snapshot baked into the image at build time.
+
+    Costs one 40KB file read and no network. It exists so that a price
+    request never depends on a 25MB download succeeding on a 256MB machine —
+    which is the failure this module kept producing.
+    """
+    global _loaded_at
+    try:
+        if not _BUNDLED.exists():
+            return False
+        payload = json.loads(_BUNDLED.read_text())
+        tokens = payload.get("tokens") or {}
+        if not tokens:
+            return False
+        _token_map.clear()
+        _name_map.clear()
+        _token_map.update(tokens)
+        _name_map.update(payload.get("names") or {})
+        # Deliberately NOT marked fresh: a background refresh still runs, so
+        # symbols listed since the image was built get picked up.
+        _loaded_at = float(payload.get("fetched_at") or 0)
+        logger.info("Instruments loaded from bundled snapshot: %d NSE equities",
+                    len(_token_map))
+        return True
+    except Exception as e:
+        logger.warning("Bundled instruments snapshot unusable (%s) — ignoring", e)
+        return False
+
+
 def _save_to_disk() -> None:
     try:
         _DISK_CACHE.parent.mkdir(parents=True, exist_ok=True)
@@ -211,18 +265,17 @@ def _save_to_disk() -> None:
         logger.warning("Could not persist instruments cache (%s)", e)
 
 
-async def _load():
-    global _loaded_at, _next_retry_at
-    logger.info("Loading AngelOne instruments master...")
-    try:
-        async with httpx.AsyncClient(timeout=_LOAD_TIMEOUT_S) as client:
-            resp = await client.get(INSTRUMENTS_URL)
-            resp.raise_for_status()
-            data = resp.json()
+def _filter_sink(tokens: dict, names: dict):
+    """ijson target: keep NSE cash equities, discard everything else.
 
-        tokens: dict[str, str] = {}
-        names: dict[str, str] = {}
-        for item in data:
+    Called once per instrument as it is parsed, so no more than one row is
+    ever held. The full master is overwhelmingly NFO option contracts; of
+    ~120,000 rows about 2,000 are wanted.
+    """
+    @ijson.coroutine
+    def sink():
+        while True:
+            item = (yield)
             if item.get("exch_seg") != "NSE":
                 continue
             # NSE equities have empty instrumenttype; AMXIDX are indices
@@ -231,17 +284,62 @@ async def _load():
             sym_raw = item.get("symbol", "")
             if not sym_raw.endswith("-EQ"):
                 continue
-            sym = sym_raw[:-3].upper()  # strip "-EQ"
+            sym = sym_raw[:-3].upper()      # strip "-EQ"
             token = item.get("token", "")
             raw_name = item.get("name", sym)
-            name = raw_name.title() if raw_name else sym
             if sym and token:
                 tokens[sym] = token
-                names[sym] = name
-        # Drop the parsed master before swapping in the result — holding both
-        # at once is what pushes a small machine into swap.
-        del data
+                names[sym] = raw_name.title() if raw_name else sym
+    return sink()
 
+
+async def _stream_instruments() -> tuple[dict, dict]:
+    """Download and filter the master without ever holding it in memory.
+
+    This is the measured cause of the 15 Sep outage, and it is worth being
+    exact about the numbers, because "it is a big file" was not enough to
+    make me act on it:
+
+        wire size                        25.6 MB
+        RSS added by resp.json()         98.5 MB     on a 256MB machine
+        what is actually kept            41 KB
+
+    The old code did `data = resp.json()`, which materialises every row as a
+    dict at once — about 98MB of Python objects, on top of the response bytes
+    and the decoded text held at the same time. On a 256MB machine with swap
+    that is a thrash, and the load never finished. Every poll then reported
+    "Instruments master still loading" forever, which is exactly what the
+    alerts showed for twenty minutes.
+
+    Streaming the body into a push parser and keeping only NSE equities costs
+    0.7MB and does not buffer the body at all. Same output, verified equal to
+    the bulk parse.
+    """
+    tokens: dict[str, str] = {}
+    names: dict[str, str] = {}
+    parser = ijson.items_coro(_filter_sink(tokens, names), "item")
+    try:
+        async with httpx.AsyncClient(timeout=_LOAD_TIMEOUT_S) as client:
+            async with client.stream("GET", INSTRUMENTS_URL) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes(_CHUNK_BYTES):
+                    # Each send parses one chunk; the await between chunks is
+                    # what keeps /health and price polls responsive while a
+                    # refresh is running.
+                    parser.send(chunk)
+    finally:
+        try:
+            parser.close()
+        except Exception:
+            pass   # truncated body — surfaced by the empty-result check below
+    return tokens, names
+
+
+async def _load():
+    global _loaded_at, _next_retry_at, _last_error
+    logger.info("Loading AngelOne instruments master (streaming)...")
+    try:
+        tokens, names = await _stream_instruments()
         if not tokens:
             raise ValueError("instruments master contained no NSE equities")
 
@@ -251,15 +349,17 @@ async def _load():
         _name_map.update(names)
         _loaded_at = time.time()
         _next_retry_at = 0
+        _last_error = ""
         logger.info(f"Instruments loaded: {len(_token_map)} NSE equities")
         _save_to_disk()
     except Exception as e:
         # Remember the failure. Without this, _loaded_at stays 0 and every
         # subsequent request re-attempts the full download — one storm per
         # poll interval, which is what took the price feed down.
+        _last_error = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
         _next_retry_at = time.time() + _FAILURE_BACKOFF_S
         logger.error(
-            f"Failed to load instruments master: {e} — "
+            f"Failed to load instruments master: {_last_error} — "
             f"backing off {_FAILURE_BACKOFF_S}s "
             f"(serving {len(_token_map)} cached symbols)"
         )

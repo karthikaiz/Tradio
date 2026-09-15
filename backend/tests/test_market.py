@@ -339,7 +339,7 @@ async def test_a_slow_token_load_cannot_eat_the_deadline():
 
     assert elapsed < 2.0, f"token stage ran {elapsed:.1f}s, ignoring its cap"
     # And it must say it was still loading, not that the ticker is unknown.
-    assert "still loading" in errors["ADANIENSOL"], errors
+    assert "Instruments master unavailable" in errors["ADANIENSOL"], errors
 
 
 def test_the_token_wait_is_smaller_than_the_load_it_waits_on():

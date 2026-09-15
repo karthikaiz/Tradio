@@ -4,6 +4,7 @@ uvicorn[standard]
 sqlalchemy[asyncio]
 asyncpg
 httpx
+ijson
 pytest
 pytest-asyncio
 pytest-mock
