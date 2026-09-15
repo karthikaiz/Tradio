@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import traceback
@@ -36,16 +37,37 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
-@app.on_event("startup")
-async def _warm_angel_session():
-    """Pre-login to Angel One at startup so the first /api/portfolio request
-    doesn't block for ~16s waiting for session initialisation."""
+async def _warm_angel_session_bg():
     try:
         from app.services.angel_client import angel_session
         await angel_session.client()
-        logger.info("Angel One session warmed up at startup")
+        logger.info("Angel One session warmed up in background")
     except Exception as e:
         logger.warning("Angel One warmup failed (non-fatal): %s", e)
+
+
+@app.on_event("startup")
+async def _warm_angel_session():
+    """Warm the Angel session WITHOUT blocking the server from serving.
+
+    This used to await the login here. A startup handler runs before uvicorn
+    binds the port, so the process was unreachable until Angel answered — by
+    its own estimate ~16s, and unbounded, because the login had no timeout.
+
+    Fly begins health-checking at grace_period (15s) with a 5s timeout. A
+    boot that spends longer than that inside the Angel login therefore fails
+    its checks while still starting, Fly kills the machine, and the next boot
+    does the same thing: a restart loop in which the app never finishes
+    starting. From outside it looks like every price request timing out at
+    once, with /health unreachable too — which is exactly the recurring
+    "price feed stale" outage, and why fixes inside the app never helped.
+    They were in a process that was not running.
+
+    Liveness must not depend on a third party being reachable. The warmup is
+    now a background task: the port binds immediately, /health answers, and
+    the first price request pays for the session if the warmup has not landed.
+    """
+    asyncio.create_task(_warm_angel_session_bg())
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",

@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 _LOGIN_COOLDOWN_S = 15  # avoid hammering Angel's rate-limited auth endpoint
+_LOGIN_TIMEOUT_S = 20   # a login that cannot finish in this must not block a caller
 
 
 class AngelSession:
@@ -60,7 +61,13 @@ class AngelSession:
             return obj
 
         loop = asyncio.get_running_loop()
-        self._client = await loop.run_in_executor(None, _do_login)
+        # Bounded. generateSession is a blocking requests call to Angel's auth
+        # endpoint and previously had no ceiling at all, so a hung login hung
+        # whatever awaited it — including, until recently, the startup handler,
+        # which meant the server never bound its port and Fly restart-looped it.
+        self._client = await asyncio.wait_for(
+            loop.run_in_executor(None, _do_login), timeout=_LOGIN_TIMEOUT_S
+        )
         self._expires_at = time.time() + 6 * 3600
         logger.info("AngelOne session established")
 
