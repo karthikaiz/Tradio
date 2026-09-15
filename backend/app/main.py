@@ -38,12 +38,35 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
 
 
 async def _warm_angel_session_bg():
-    try:
-        from app.services.angel_client import angel_session
+    """Pre-pay for everything the price path would otherwise pay for itself.
+
+    Both of these are slow the first time and cheap forever after, and a price
+    poll now refuses to wait long for either. If they are not warmed here, the
+    first polls after a deploy fail — which is what "price feed stale" looked
+    like minutes after every deploy.
+
+    They are warmed concurrently because they are independent, and neither is
+    allowed to fail the other.
+    """
+    from app.services.angel_client import angel_session
+    from app.services.instruments import get_tokens_batch
+
+    async def _session():
         await angel_session.client()
         logger.info("Angel One session warmed up in background")
-    except Exception as e:
-        logger.warning("Angel One warmup failed (non-fatal): %s", e)
+
+    async def _instruments():
+        # A deploy replaces the machine, so the /tmp snapshot is gone and this
+        # is a full scrip-master download. Doing it here means the poll does
+        # not, and it is unbounded here precisely because nothing waits on it.
+        await get_tokens_batch(["RELIANCE"])
+        logger.info("Instruments master warmed up in background")
+
+    results = await asyncio.gather(_session(), _instruments(), return_exceptions=True)
+    for label, result in zip(("Angel One session", "Instruments master"), results):
+        if isinstance(result, Exception):
+            logger.warning("%s warmup failed (non-fatal): %s: %s",
+                           label, type(result).__name__, result)
 
 
 @app.on_event("startup")

@@ -46,13 +46,31 @@ _next_retry_at: float = 0
 _refresh_task: asyncio.Task | None = None
 
 _CACHE_TTL = 24 * 3600
-# Well under the 45s budget Algobot allows for a price call, so a slow load
-# fails fast instead of hanging the caller past its own timeout.
+# How long the DOWNLOAD may take. This is deliberately longer than any single
+# caller is willing to wait: the load runs as a background task, and callers
+# wait on it only for whatever slice of their own budget they can spare. A
+# caller that gives up does not cancel it.
+#
+# It used to be the caller's timeout as well, and the comment here justified
+# 25s against "the 45s budget Algobot allows for a price call". That budget is
+# no longer 45s — the price path is capped by market.BATCH_DEADLINE_S (18s) —
+# so a cold load could not finish inside the request that triggered it, and
+# every poll blew the deadline. Callers no longer inherit this number at all.
 _LOAD_TIMEOUT_S = 25
 _FAILURE_BACKOFF_S = 300
 _DISK_CACHE = Path(os.getenv("INSTRUMENTS_CACHE_PATH", "/tmp/tradio_instruments.json"))
 
 _lock = LoopLock()
+
+
+def is_ready() -> bool:
+    """True once symbols can be resolved at all.
+
+    Lets a caller tell "this symbol does not exist" apart from "the master has
+    not loaded yet" — reported identically before, which made a cold start look
+    like a bad ticker.
+    """
+    return bool(_token_map)
 
 
 async def get_token(symbol: str) -> str | None:
@@ -65,9 +83,15 @@ async def get_name(symbol: str) -> str | None:
     return _name_map.get(symbol.upper())
 
 
-async def get_tokens_batch(symbols: list[str]) -> dict[str, str]:
-    """Returns {symbol: token} for all symbols found in instruments master."""
-    await _ensure_loaded()
+async def get_tokens_batch(
+    symbols: list[str], max_wait: float | None = None
+) -> dict[str, str]:
+    """Returns {symbol: token} for all symbols found in instruments master.
+
+    max_wait caps how long a cold load may hold this call up. Callers on a
+    deadline pass what they can afford; None means wait for the load.
+    """
+    await _ensure_loaded(max_wait)
     result = {}
     for sym in symbols:
         token = _token_map.get(sym.upper())
@@ -80,7 +104,21 @@ def _is_fresh() -> bool:
     return bool(_token_map) and (time.time() - _loaded_at) < _CACHE_TTL
 
 
-async def _ensure_loaded() -> None:
+async def _ensure_loaded(max_wait: float | None = None) -> None:
+    """Populate the maps, waiting at most `max_wait` on a cold load.
+
+    Two rules, both learned the hard way:
+
+    A caller never *owns* the load. It runs as a background task and the
+    caller merely waits on it. If the caller instead awaited it directly,
+    giving up would cancel the download — and with a poll every 30s the
+    download would be restarted and killed forever, so no request would ever
+    get tokens. Bounding the wait is only safe because the work survives it.
+
+    A caller never waits *unbounded*. This is what broke: a cold load is a
+    large download bounded at _LOAD_TIMEOUT_S, and it sat on the price path
+    with no relation to the price path's own deadline.
+    """
     if _is_fresh():
         return
 
@@ -91,15 +129,28 @@ async def _ensure_loaded() -> None:
         _schedule_refresh()
         return
 
-    async with _lock.get():
-        if _token_map:                      # filled while we waited
-            return
-        if _load_from_disk():
-            _schedule_refresh()             # warm now, fresh shortly
-            return
-        if time.time() < _next_retry_at:
-            return                          # backing off — fail fast, don't storm
-        await _load()
+    if _load_from_disk():                   # cheap, synchronous, no await
+        _schedule_refresh()                 # warm now, fresh shortly
+        return
+
+    if time.time() < _next_retry_at:
+        return                              # backing off — fail fast, don't storm
+
+    _schedule_refresh()                     # one shared cold load, in background
+    task = _refresh_task
+    if task is None or task.done() or (max_wait is not None and max_wait <= 0):
+        return
+    try:
+        # shield: the timeout abandons the WAIT, never the download.
+        await asyncio.wait_for(asyncio.shield(task), timeout=max_wait)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Instruments master still loading after %.1fs — caller continuing "
+            "without tokens; the download is unaffected and continues",
+            max_wait,
+        )
+    except Exception:
+        pass   # _load already logged and armed the backoff
 
 
 def _schedule_refresh() -> None:
