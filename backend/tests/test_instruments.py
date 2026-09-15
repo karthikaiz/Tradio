@@ -215,3 +215,84 @@ def test_price_path_does_not_import_pandas_or_yfinance():
         f"price-path modules import {leaked} at module scope — "
         f"that is ~93MB resident on a 256MB machine"
     )
+
+
+# ── the 15 Sep outage: a cold load on the price path ─────────────────────────
+
+async def test_a_cold_load_does_not_hold_up_the_caller():
+    """The failure, verbatim from the alert:
+
+        DATA HEALTH: Price feed stale >60s for: ADANIENSOL (Upstream quote
+        exceeded the 18s server deadline), BHARATFORG (...), LAURUSLABS (...)
+
+    minutes after a deploy. A deploy replaces the machine, so the /tmp
+    snapshot is gone and the in-memory map is empty. _ensure_loaded then
+    awaited the full scrip-master download inline — bounded at
+    _LOAD_TIMEOUT_S (25s), on a path the endpoint cuts off at 18s, and
+    inside no timeout of its own. Every poll after a deploy blew the
+    deadline for every ticker at once.
+
+    The caller now waits only what it can afford.
+    """
+    started = time.monotonic()
+
+    async def _slow_load():
+        await asyncio.sleep(10)
+
+    with patch.object(instruments, "_load", _slow_load):
+        tokens = await instruments.get_tokens_batch(["RELIANCE"], max_wait=0.2)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2.0, (
+        f"a cold load held the caller for {elapsed:.1f}s despite a 0.2s cap — "
+        f"this is the 15 Sep outage"
+    )
+    assert tokens == {}   # nothing yet, and that is reported honestly
+
+
+async def test_giving_up_on_the_wait_does_not_cancel_the_download():
+    """The reason bounding the wait is safe, and why it must be a task.
+
+    If the caller awaited the load directly, its timeout would CANCEL the
+    download. At a 30s poll interval that restarts and kills the same
+    download forever, so no request ever gets tokens — a worse failure than
+    the one being fixed. The load therefore runs as a background task and
+    the caller only ever waits on it.
+    """
+    finished = asyncio.Event()
+
+    async def _slow_load():
+        await asyncio.sleep(0.4)
+        instruments._token_map["RELIANCE"] = "2885"
+        instruments._loaded_at = time.time()
+        finished.set()
+
+    with patch.object(instruments, "_load", _slow_load):
+        # First caller gives up well before the load completes.
+        assert await instruments.get_tokens_batch(["RELIANCE"], max_wait=0.05) == {}
+        # The download must still be alive and must complete on its own.
+        await asyncio.wait_for(finished.wait(), timeout=2.0)
+        # The next poll, 30s later in production, finds it there.
+        assert await instruments.get_tokens_batch(["RELIANCE"], max_wait=0.05) == {
+            "RELIANCE": "2885"
+        }
+
+
+async def test_concurrent_cold_callers_share_one_download():
+    """Four watched tickers must not mean four scrip-master downloads."""
+    calls = 0
+
+    async def _counting_load():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.2)
+        instruments._token_map["RELIANCE"] = "2885"
+        instruments._loaded_at = time.time()
+
+    with patch.object(instruments, "_load", _counting_load):
+        await asyncio.gather(*[
+            instruments.get_tokens_batch(["RELIANCE"], max_wait=1.0)
+            for _ in range(4)
+        ])
+
+    assert calls == 1, f"{calls} concurrent downloads — that is the storm"

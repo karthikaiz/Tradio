@@ -5,7 +5,7 @@ from collections import deque
 from datetime import date, datetime, timezone
 
 from app.services.angel_client import angel_session
-from app.services.instruments import get_token, get_tokens_batch
+from app.services.instruments import get_token, get_tokens_batch, is_ready as instruments_ready
 
 logger = logging.getLogger(__name__)
 
@@ -55,25 +55,42 @@ _BATCH_TIMEOUT_S = 7.0
 # with a clear reason and the next one (30s later) finds it there.
 _SESSION_WAIT_S = 3.0
 
+# How long a price request may wait for the instruments master.
+#
+# Same shape as _SESSION_WAIT_S, and the same bug one stage earlier: a cold
+# load is a large download bounded at instruments._LOAD_TIMEOUT_S (25s) on an
+# 18s deadline, and it sat outside every timeout on this path. The load now
+# runs in the background and survives this wait expiring.
+_TOKEN_WAIT_S = 3.0
+
 # Hard ceiling on the whole batch, enforced by the endpoint. Answering here
 # is strictly better than letting the client hit its own timeout: the client
 # learns nothing from that, but a response carries the reason per ticker.
 BATCH_DEADLINE_S = 18.0
 
 
-def _worst_case_fetch_s(per_attempt: float = _BATCH_TIMEOUT_S) -> float:
-    """Longest one chunk can take, INCLUDING the wait for the session.
-
-    The session wait is the part that kept being left out — of the budget and
-    of the test that was supposed to guard it. Every await on this path has to
-    be counted, not just the one that happens to be wrapped in a timeout.
-    """
-    attempts = _MAX_FETCH_ATTEMPTS
-    return (
-        _SESSION_WAIT_S                      # obtaining the Angel session
-        + per_attempt * attempts             # the quote calls themselves
-        + _RETRY_DELAY_S * (attempts - 1)    # the gap between retries
-    )
+# ── Why there is no longer a hand-written worst case ──────────────────────────
+#
+# There used to be a _worst_case_fetch_s() that added up the timeouts on this
+# path, and a test asserting the sum fit the deadline. It was green every time
+# the deadline was actually blown, because it could only add up the awaits I
+# remembered to put in it. Four times now the real overrun was in one I did not:
+#
+#   60s instruments load   vs a 45s caller
+#   20.5s quote            vs a 20s client budget
+#   20s Angel login        vs a 16s deadline   (outside the per-attempt timeout)
+#   25s instruments load   vs an 18s deadline  (outside every timeout)
+#
+# The last two were *below* a comment insisting every await must be counted.
+# So the deadline is no longer re-derived by addition — it is propagated. One
+# absolute deadline is set at the top of the request and every stage gets
+# min(its own timeout, what is left). A stage added later inherits this by
+# construction, whatever constant it brings with it, which is the part that
+# repeatedly failed to happen by hand.
+def _deadline(budget_s: float):
+    """Returns remaining() -> seconds left, from an absolute deadline."""
+    t_end = time.monotonic() + budget_s
+    return lambda: t_end - time.monotonic()
 
 
 # ── Where the time actually goes ──────────────────────────────────────────────
@@ -161,9 +178,14 @@ async def get_price(ticker: str) -> float:
     return price
 
 
-async def get_prices_batch(tickers: list[str]) -> tuple[dict[str, float], dict[str, str]]:
+async def get_prices_batch(
+    tickers: list[str], budget_s: float = BATCH_DEADLINE_S
+) -> tuple[dict[str, float], dict[str, str]]:
     """
     Fetch many tickers in ONE Angel call. Returns ({ticker: price}, {ticker: error}).
+
+    budget_s is a hard wall-clock budget for everything below, shared out
+    across the stages. No stage may outlive it, whatever its own timeout says.
 
     The per-ticker path (get_price) issues one blocking `requests` call per
     symbol inside the default thread pool. Fanning that out across N holdings
@@ -197,11 +219,23 @@ async def get_prices_batch(tickers: list[str]) -> tuple[dict[str, float], dict[s
         return prices, errors
 
     t_start = time.monotonic()
-    token_map = await get_tokens_batch(to_fetch)
+    remaining = _deadline(budget_s)
+
+    # Stage 1 — symbol → token. Capped by what this request can spare.
+    token_map = await get_tokens_batch(
+        to_fetch, max_wait=min(_TOKEN_WAIT_S, remaining())
+    )
     t_tokens = time.monotonic() - t_start
+    # "Not found" and "not loaded yet" are completely different faults and
+    # used to be reported with the same words, which made a cold start read
+    # as a bad ticker.
+    missing_reason = (
+        "Symbol not found in instruments master" if instruments_ready()
+        else "Instruments master still loading — this poll skipped, next one will find it"
+    )
     for ticker in to_fetch:
         if ticker not in token_map:
-            errors[ticker] = "Symbol not found in instruments master"
+            errors[ticker] = missing_reason
     resolved = {t: tok for t, tok in token_map.items() if t in set(to_fetch)}
     if not resolved:
         return prices, errors
@@ -211,7 +245,15 @@ async def get_prices_batch(tickers: list[str]) -> tuple[dict[str, float], dict[s
 
     for chunk_start in range(0, len(token_list), _BATCH_QUOTE_LIMIT):
         chunk = token_list[chunk_start:chunk_start + _BATCH_QUOTE_LIMIT]
-        fetched, reason = await _fetch_quote_chunk(chunk)
+        # Stage 2 — the quote itself, with whatever stage 1 left behind.
+        left = remaining()
+        if left <= 0:
+            for token in chunk:
+                errors[ticker_by_token[token]] = (
+                    f"Ran out of the {budget_s:.0f}s budget before quoting"
+                )
+            continue
+        fetched, reason = await _fetch_quote_chunk(chunk, budget_s=left)
         if reason is not None:
             for token in chunk:
                 errors[ticker_by_token[token]] = reason
@@ -258,21 +300,33 @@ async def get_prices_batch(tickers: list[str]) -> tuple[dict[str, float], dict[s
     return prices, errors
 
 
-async def _fetch_quote_chunk(tokens: list[str]) -> tuple[list[dict], str | None]:
-    """One Angel getMarketData call, retried once. Returns (rows, error_reason)."""
+async def _fetch_quote_chunk(
+    tokens: list[str], budget_s: float = _BATCH_TIMEOUT_S
+) -> tuple[list[dict], str | None]:
+    """One Angel getMarketData call, retried once. Returns (rows, error_reason).
+
+    Every await here takes min(its own timeout, what is left of budget_s), so
+    the chunk cannot outlive the budget handed down by the endpoint.
+    """
     last_error: Exception | None = None
+    remaining = _deadline(budget_s)
     for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
         try:
             # Bounded: a price poll must never pay for an Angel login. The
             # background warmup owns that; if the session is not ready this
             # poll gives up quickly rather than blowing the endpoint's budget.
+            session_wait = min(_SESSION_WAIT_S, remaining())
+            if session_wait <= 0:
+                raise RuntimeError(
+                    f"Ran out of the {budget_s:.0f}s budget before the session was ready"
+                )
             try:
                 client = await asyncio.wait_for(
-                    angel_session.client(), timeout=_SESSION_WAIT_S
+                    angel_session.client(), timeout=session_wait
                 )
             except asyncio.TimeoutError:
                 raise RuntimeError(
-                    f"Angel session not ready within {_SESSION_WAIT_S:.0f}s "
+                    f"Angel session not ready within {session_wait:.0f}s "
                     f"(still logging in) — skipping this poll"
                 ) from None
             loop = asyncio.get_event_loop()
@@ -280,9 +334,14 @@ async def _fetch_quote_chunk(tokens: list[str]) -> tuple[list[dict], str | None]
             def _fetch():
                 return client.getMarketData("FULL", {"NSE": tokens})
 
+            quote_timeout = min(_BATCH_TIMEOUT_S, remaining())
+            if quote_timeout <= 0:
+                raise RuntimeError(
+                    f"Ran out of the {budget_s:.0f}s budget before the quote call"
+                )
             resp = await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch),
-                timeout=_BATCH_TIMEOUT_S,
+                timeout=quote_timeout,
             )
             if not resp.get("status"):
                 # Angel returns status:false for transient gateway failures too
@@ -292,10 +351,13 @@ async def _fetch_quote_chunk(tokens: list[str]) -> tuple[list[dict], str | None]
             return resp.get("data", {}).get("fetched", []) or [], None
         except Exception as e:
             last_error = e
-            if attempt < _MAX_FETCH_ATTEMPTS:
+            # Only retry if there is room for the delay AND a real attempt.
+            if attempt < _MAX_FETCH_ATTEMPTS and remaining() > _RETRY_DELAY_S:
                 logger.warning(f"Batch quote attempt {attempt} failed ({e}) — retrying")
                 await asyncio.sleep(_RETRY_DELAY_S)
-    return [], str(last_error)
+            else:
+                break
+    return [], str(last_error) or type(last_error).__name__
 
 
 async def get_daily_closes(

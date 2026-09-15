@@ -1,4 +1,5 @@
 import asyncio
+import time
 import logging
 import pytest
 from datetime import datetime, timezone, timedelta
@@ -233,10 +234,17 @@ async def test_batch_reports_ticker_missing_from_response():
 
 
 async def test_batch_flags_unknown_symbol_without_calling_angel():
+    """A symbol genuinely absent from a LOADED master.
+
+    instruments_ready is patched true on purpose: the same empty token_map
+    means something completely different when the master has not loaded yet,
+    and that case is covered by test_a_slow_token_load_cannot_eat_the_deadline.
+    """
     from app.services.market import get_prices_batch
     client = make_batch_client([])
     with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
                return_value={}), \
+         patch("app.services.market.instruments_ready", lambda: True), \
          patch("app.services.market.angel_session") as sess:
         sess.client = AsyncMock(return_value=client)
         prices, errors = await get_prices_batch(["NOSUCHTICKER"])
@@ -262,46 +270,102 @@ async def test_batch_serves_cache_without_hitting_angel():
 
 # ── timeout budget (the bug that caused the 14 Sep outage) ───────────────────
 
-def test_server_worst_case_fits_inside_the_client_budget():
-    """The failure this encodes, verbatim from the alert:
+async def test_no_stage_can_outlive_the_deadline_however_it_is_configured():
+    """The test that does not depend on me remembering the stages.
 
-        GET /api/market/multi-price (timeout=20s) failed after 20.0s
+    Four times a stage overran the deadline while a budget test stayed green,
+    because that test could only add up the awaits I had thought to put in it:
 
-    _BATCH_TIMEOUT_S was 10s with 2 attempts and a 0.5s delay = 20.5s worst
-    case, against a 20.0s client budget. The client therefore abandoned the
-    request half a second before the server could possibly answer — every
-    time Angel was slow enough to burn both attempts. Not intermittent: a
-    certainty, by arithmetic.
+        60s instruments load  vs a 45s caller
+        20.5s quote           vs a 20s client budget
+        20s Angel login       vs a 16s deadline
+        25s instruments load  vs an 18s deadline
 
-    The same shape had already been fixed once in instruments.py (60s load
-    vs a 45s caller) and was then recreated here, so it is asserted rather
-    than left to review.
+    So this asserts the property instead of the arithmetic. Every timeout on
+    the path is set hostile — far larger than the deadline — and the batch
+    must STILL come back inside it. Adding a new stage that ignores the
+    deadline fails this without anyone having to update a sum.
     """
     from app.services import market
 
-    worst = market._worst_case_fetch_s()
-    # The session wait counts. It sits outside the per-attempt timeout, so
-    # leaving it out of this sum is precisely how a 20s login got onto a path
-    # budgeted at 16s while this test stayed green.
-    assert market._SESSION_WAIT_S > 0
-    assert worst >= market._SESSION_WAIT_S, "session wait must be in the budget"
-    assert worst < market.BATCH_DEADLINE_S, (
-        f"one chunk can take {worst}s but the endpoint cuts off at "
-        f"{market.BATCH_DEADLINE_S}s"
+    async def _never_returns(*a, **k):
+        await asyncio.sleep(60)
+
+    slow_session = AsyncMock()
+    slow_session.client = _never_returns
+
+    with patch.object(market, "_BATCH_TIMEOUT_S", 999.0), \
+         patch.object(market, "_SESSION_WAIT_S", 999.0), \
+         patch.object(market, "_TOKEN_WAIT_S", 999.0), \
+         patch.object(market, "_RETRY_DELAY_S", 999.0), \
+         patch.object(market, "angel_session", slow_session), \
+         patch.object(market, "get_tokens_batch", AsyncMock(return_value={"X": "1"})), \
+         patch.object(market, "instruments_ready", lambda: True):
+        started = time.monotonic()
+        prices, errors = await market.get_prices_batch(["X"], budget_s=1.0)
+        elapsed = time.monotonic() - started
+
+    assert elapsed < 3.0, (
+        f"batch took {elapsed:.1f}s against a 1.0s budget — a stage is not "
+        f"honouring the deadline"
     )
+    assert prices == {}
+    assert "X" in errors
+
+
+async def test_a_slow_token_load_cannot_eat_the_deadline():
+    """The 15 Sep failure: a cold instruments load on the price path.
+
+    A deploy replaces the machine, so the /tmp snapshot is gone and the first
+    poll triggers a full scrip-master download bounded at 25s — on an 18s
+    deadline, inside no timeout at all. Every poll after a deploy therefore
+    exceeded the deadline and reported "Upstream quote exceeded the 18s
+    server deadline" for every ticker at once.
+    """
+    from app.services import market
+
+    async def _slow_tokens(symbols, max_wait=None):
+        # Honours max_wait the way the real one does: bounded wait, and the
+        # download survives it.
+        await asyncio.sleep(min(max_wait if max_wait is not None else 30, 30))
+        return {}
+
+    with patch.object(market, "get_tokens_batch", _slow_tokens), \
+         patch.object(market, "_TOKEN_WAIT_S", 0.2), \
+         patch.object(market, "instruments_ready", lambda: False):
+        started = time.monotonic()
+        prices, errors = await market.get_prices_batch(["ADANIENSOL"], budget_s=5.0)
+        elapsed = time.monotonic() - started
+
+    assert elapsed < 2.0, f"token stage ran {elapsed:.1f}s, ignoring its cap"
+    # And it must say it was still loading, not that the ticker is unknown.
+    assert "still loading" in errors["ADANIENSOL"], errors
+
+
+def test_the_token_wait_is_smaller_than_the_load_it_waits_on():
+    """Sanity on the two constants, stated where both are visible.
+
+    _LOAD_TIMEOUT_S is deliberately LONGER than the caller's wait — the load
+    is a background task that outlives any one request. That is only safe
+    because the caller no longer owns it; if a caller awaited the load
+    directly, a 30s poll would cancel and restart it forever.
+    """
+    from app.services import market
+    from app.services import instruments
+
+    assert market._TOKEN_WAIT_S < market.BATCH_DEADLINE_S
+    assert market._TOKEN_WAIT_S < instruments._LOAD_TIMEOUT_S
+
+
+def test_the_deadline_still_lands_before_the_client_gives_up():
+    """Answering with a reason beats being cut off carrying none."""
+    from app.services import market
+
     assert market.BATCH_DEADLINE_S < market.CLIENT_BUDGET_S, (
         f"server deadline {market.BATCH_DEADLINE_S}s must land before the "
         f"client gives up at {market.CLIENT_BUDGET_S}s, or the client learns "
         f"nothing about why"
     )
-
-
-def test_single_ticker_path_also_fits_the_budget():
-    """get_price backs /api/market/price and the order path; it retries too."""
-    from app.services import market
-
-    worst = market._worst_case_fetch_s(per_attempt=8.0)   # get_price's timeout
-    assert worst < market.CLIENT_BUDGET_S
 
 
 async def test_multi_price_answers_with_a_reason_instead_of_hanging():
