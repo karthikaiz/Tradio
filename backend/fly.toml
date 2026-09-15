@@ -36,9 +36,16 @@ swap_size_mb = 512
     hard_limit = 30
 
   [[http_service.checks]]
-    interval     = "30s"
-    timeout      = "5s"
-    grace_period = "15s"
+    interval = "30s"
+    timeout  = "5s"
+    # 15s was not enough to boot. Imports alone are ~72MB on a throttled
+    # shared-cpu-1x, and the startup handler then blocked on an unbounded
+    # Angel login (~16s by its own estimate). Checks began while the app was
+    # still starting, failed, and Fly killed the machine — which restarted and
+    # did the same thing. The startup handler no longer blocks, so this is
+    # only a margin now, but a too-tight grace period is what turned a slow
+    # boot into a restart loop and it should not be tight.
+    grace_period = "60s"
     method       = "GET"
     path         = "/health"
 
