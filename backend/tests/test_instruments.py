@@ -447,3 +447,113 @@ async def test_the_bundled_snapshot_is_used_when_the_network_is_dead():
         )
     finally:
         instruments._BUNDLED = original
+
+
+# ── real httpx + real ijson, end to end ──────────────────────────────────────
+#
+# mock_http() above fakes the stream, which is fine for the load/backoff
+# logic but is exactly how a wrong ijson call could pass. These use a real
+# httpx client over a MockTransport, so the bytes really are streamed and
+# really are parsed by the real parser.
+
+def _real_httpx(body: bytes | None = None, status: int = 200, exc=None):
+    """Patch target: a genuine httpx.AsyncClient serving `body` in-process."""
+    import httpx
+    real = httpx.AsyncClient   # captured before the patch replaces it
+
+    def handler(request):
+        if exc:
+            raise exc
+        return httpx.Response(status, content=body or b"")
+
+    def factory(*a, **k):
+        k.pop("timeout", None)
+        return real(transport=httpx.MockTransport(handler), **k)
+
+    return patch("app.services.instruments.httpx.AsyncClient", side_effect=factory)
+
+
+def _load_script():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "scripts" / "fetch_instruments.py"
+    spec = importlib.util.spec_from_file_location("fetch_instruments_under_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+async def test_a_truncated_master_fails_the_load_instead_of_caching_a_partial_map():
+    """A connection cut halfway must FAIL the load.
+
+    close() was wrapped in `except Exception: pass` under a comment claiming a
+    truncated body was caught by the empty-result check. It is not: a
+    half-received master still holds hundreds of symbols, so the load
+    "succeeded", wrote a partial map to disk and treated it as fresh for 24h.
+    Demonstrated: 501 of 1000 rows kept, no error raised.
+    """
+    rows = [{"exch_seg": "NSE", "instrumenttype": "", "symbol": f"S{i}-EQ",
+             "token": str(i), "name": "x"} for i in range(1000)]
+    full = json.dumps(rows).encode()
+    truncated = full[: len(full) // 2]
+
+    with _real_httpx(truncated), patch.object(instruments, "_CHUNK_BYTES", 512):
+        await instruments._load()
+
+    assert instruments._token_map == {}, "a partial master must not be accepted"
+    assert not instruments._DISK_CACHE.exists(), "and must not be persisted"
+    assert instruments.load_status().startswith("load FAILED")
+    assert "Incomplete" in instruments.load_status() or "JSON" in instruments.load_status()
+
+
+async def test_the_real_parser_handles_a_real_streamed_body():
+    """Same assertion as the double-based test, but nothing is faked."""
+    body = json.dumps(SCRIP).encode()
+    with _real_httpx(body), patch.object(instruments, "_CHUNK_BYTES", 37):
+        await instruments._load()
+    assert instruments._token_map == {"RELIANCE": "2885", "LAURUSLABS": "1234"}
+
+
+async def test_the_bake_script_writes_a_snapshot_the_app_can_load(tmp_path):
+    """The script crashed on every real run — ijson was handed a byte
+    generator where a file-like object is required — and, being non-fatal by
+    design, would have done so silently on every deploy. It was found only by
+    running it in CI. It now shares the app's own loader, and this runs it.
+    """
+    script = _load_script()
+    out = tmp_path / "instruments.json"
+    body = json.dumps(SCRIP).encode()
+
+    with _real_httpx(body), patch.object(instruments, "_CHUNK_BYTES", 37):
+        written = await script.bake(out)
+
+    assert written == 2
+    assert out.exists()
+
+    # And the app really can start from it, with no network involved.
+    original = instruments._BUNDLED
+    try:
+        instruments._BUNDLED = out
+        assert instruments._load_bundled() is True
+    finally:
+        instruments._BUNDLED = original
+    assert instruments._token_map == {"RELIANCE": "2885", "LAURUSLABS": "1234"}
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"status": 503},                                   # upstream error
+    {"exc": RuntimeError("network down")},             # no connection
+    {"body": b'[{"exch_seg": "NSE", "symbol": "A-EQ"'},  # truncated mid-row
+])
+async def test_the_bake_script_writes_nothing_when_the_download_is_bad(tmp_path, kwargs):
+    """Failing must leave NO file, so the image falls back to the runtime
+    load rather than shipping a partial or empty snapshot."""
+    script = _load_script()
+    out = tmp_path / "instruments.json"
+
+    with _real_httpx(**kwargs):
+        written = await script.bake(out)
+
+    assert written == 0
+    assert not out.exists()
+    assert not out.with_suffix(".tmp").exists()

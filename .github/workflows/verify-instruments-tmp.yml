@@ -3,7 +3,10 @@ name: verify-instruments-tmp
 on:
   push:
     branches: ["claude/**"]
-    paths: [".github/workflows/verify-instruments-tmp.yml"]
+    paths:
+      - ".github/workflows/verify-instruments-tmp.yml"
+      - "backend/scripts/**"
+      - "backend/app/services/instruments.py"
   workflow_dispatch:
 jobs:
   verify:

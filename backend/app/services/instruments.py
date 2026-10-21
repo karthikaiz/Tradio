@@ -318,20 +318,22 @@ async def _stream_instruments() -> tuple[dict, dict]:
     tokens: dict[str, str] = {}
     names: dict[str, str] = {}
     parser = ijson.items_coro(_filter_sink(tokens, names), "item")
-    try:
-        async with httpx.AsyncClient(timeout=_LOAD_TIMEOUT_S) as client:
-            async with client.stream("GET", INSTRUMENTS_URL) as resp:
-                resp.raise_for_status()
-                async for chunk in resp.aiter_bytes(_CHUNK_BYTES):
-                    # Each send parses one chunk; the await between chunks is
-                    # what keeps /health and price polls responsive while a
-                    # refresh is running.
-                    parser.send(chunk)
-    finally:
-        try:
-            parser.close()
-        except Exception:
-            pass   # truncated body — surfaced by the empty-result check below
+    async with httpx.AsyncClient(timeout=_LOAD_TIMEOUT_S) as client:
+        async with client.stream("GET", INSTRUMENTS_URL) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.aiter_bytes(_CHUNK_BYTES):
+                # Each send parses one chunk; the await between chunks is
+                # what keeps /health and price polls responsive while a
+                # refresh is running.
+                parser.send(chunk)
+    # End of body. This MUST be allowed to raise: close() is what reports a
+    # document that was cut off (IncompleteJSONError). It used to be wrapped
+    # in `except Exception: pass` under a comment claiming truncation was
+    # caught by the empty-result check below — it is not, a half-received
+    # master still holds hundreds of symbols. The result was a partial symbol
+    # map accepted as a successful load, written to disk and treated as fresh
+    # for 24 hours. Only reached on success, so it cannot mask a network error.
+    parser.close()
     return tokens, names
 
 
