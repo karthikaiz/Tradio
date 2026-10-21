@@ -5,7 +5,7 @@ from collections import deque
 from datetime import date, datetime, timezone
 
 from app.services.angel_client import angel_session
-from app.services.instruments import get_token, get_tokens_batch, is_ready as instruments_ready
+from app.services.instruments import get_token, get_tokens_batch, resolution_failure
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +55,14 @@ _BATCH_TIMEOUT_S = 7.0
 # with a clear reason and the next one (30s later) finds it there.
 _SESSION_WAIT_S = 3.0
 
-# How long a price request may wait for the instruments master.
+# How long a price request may wait to resolve symbols to tokens.
 #
-# Same shape as _SESSION_WAIT_S, and the same bug one stage earlier: a cold
-# load is a large download bounded at instruments._LOAD_TIMEOUT_S (25s) on an
-# 18s deadline, and it sat outside every timeout on this path. The load now
-# runs in the background and survives this wait expiring.
-_TOKEN_WAIT_S = 3.0
+# Almost always zero: the snapshot baked into the image answers from memory.
+# Only a symbol the snapshot lacks is looked up live through searchScrip, at
+# well under a second each, and what does not finish in time is left for the
+# next poll. It used to be a wait on a 36MB download that never completed
+# (see services/instruments.py), and before that a wait on nothing at all.
+_TOKEN_WAIT_S = 5.0
 
 # Hard ceiling on the whole batch, enforced by the endpoint. Answering here
 # is strictly better than letting the client hit its own timeout: the client
@@ -226,16 +227,13 @@ async def get_prices_batch(
         to_fetch, max_wait=min(_TOKEN_WAIT_S, remaining())
     )
     t_tokens = time.monotonic() - t_start
-    # "Not found" and "not loaded yet" are completely different faults and
-    # used to be reported with the same words, which made a cold start read
-    # as a bad ticker.
-    missing_reason = (
-        "Symbol not found in instruments master" if instruments_ready()
-        else "Instruments master still loading — this poll skipped, next one will find it"
-    )
+    # "Not found" and "could not look it up" are different faults and must be
+    # reported as different faults. This used to say "still loading — next one
+    # will find it" for every failure, which was false for twenty minutes at a
+    # time while the real error sat unreported.
     for ticker in to_fetch:
         if ticker not in token_map:
-            errors[ticker] = missing_reason
+            errors[ticker] = resolution_failure(ticker)
     resolved = {t: tok for t, tok in token_map.items() if t in set(to_fetch)}
     if not resolved:
         return prices, errors

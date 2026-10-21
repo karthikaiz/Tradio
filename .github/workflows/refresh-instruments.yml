@@ -1,0 +1,70 @@
+# Refresh the NSE-equity symbol snapshot that ships inside the backend image.
+#
+# Why this is its own job and not part of the deploy:
+#
+# Angel's scrip master is 36MB, served at roughly 60KB/s, and the host drops
+# the connection part-way (observed: 5,094,045 of 36,292,596 bytes, then the
+# peer closed). That makes it slow and unreliable. Doing it inside the deploy
+# would make every deploy wait on Angel's file server; doing it on the 256MB
+# production machine is what produced weeks of "price feed stale".
+#
+# Here a slow, retried, resumable download costs nothing. The result is a
+# ~100KB file committed to the repo, so deploys carry it without waiting.
+# Instrument tokens do not change, so weekly is far more than enough, and
+# anything newer is resolved live at runtime (services/instruments.py).
+name: Refresh instruments snapshot
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"          # Mondays, 02:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      URL: https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet ijson
+
+      - name: Download (retried and resumed)
+        run: |
+          # -C - resumes from what is already on disk after each drop.
+          timeout 2400 curl -fsSL --retry 80 --retry-all-errors --retry-delay 5 \
+               -C - -o "$RUNNER_TEMP/master.json" "$URL" \
+               -w 'http=%{http_code} size=%{size_download}B time=%{time_total}s\n'
+          ls -l "$RUNNER_TEMP/master.json"
+
+      - name: Bake the snapshot
+        run: python backend/scripts/fetch_instruments.py "$RUNNER_TEMP/master.json"
+
+      - name: Sanity-check before it can reach main
+        run: |
+          python - <<'PY'
+          import json, sys
+          t = json.load(open("backend/app/data/instruments.json"))["tokens"]
+          print("NSE equities:", len(t))
+          # A truncated or wrong file must never replace a good snapshot.
+          assert len(t) >= 1000, f"only {len(t)} equities - refusing to publish"
+          missing = [s for s in ("RELIANCE","ADANIENSOL","BHARATFORG","LAURUSLABS","POWERINDIA") if s not in t]
+          assert not missing, f"expected symbols missing: {missing}"
+          print("resolved:", {s: t[s] for s in ("ADANIENSOL","BHARATFORG","LAURUSLABS","POWERINDIA")})
+          PY
+
+      - name: Commit if it changed
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/data/instruments.json
+          if git diff --cached --quiet; then
+            echo "snapshot unchanged"
+          else
+            git commit -m "chore: refresh instruments snapshot [skip ci]"
+            git push
+          fi
