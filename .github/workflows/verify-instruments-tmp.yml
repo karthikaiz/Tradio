@@ -1,32 +1,51 @@
-# TEMPORARY - verifies the snapshot bake on a real runner. Deleted before merge.
+# TEMPORARY - diagnoses Angel's master-file server from a real runner. Deleted before merge.
 name: verify-instruments-tmp
 on:
   push:
     branches: ["claude/**"]
-    paths:
-      - ".github/workflows/verify-instruments-tmp.yml"
-      - "backend/scripts/**"
-      - "backend/app/services/instruments.py"
+    paths: [".github/workflows/verify-instruments-tmp.yml"]
   workflow_dispatch:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      URL: https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json
     steps:
       - uses: actions/checkout@v4
-      - run: pip install --quiet httpx ijson
-      - name: Bake and measure
+      - run: pip install --quiet ijson
+
+      - name: Probe - does the server support Range, and compress?
         run: |
-          /usr/bin/time -v python backend/scripts/fetch_instruments.py 2>&1 | grep -E "instruments|Maximum resident|Elapsed" || true
-          ls -la backend/app/data/ || echo "NO DATA DIR"
-      - name: The four tickers from the alerts must resolve
+          echo "--- HEAD ---"
+          curl -sS -I --max-time 60 "$URL" | head -25
+          echo "--- ranged GET of the first 100 bytes ---"
+          curl -sS -D - -o /tmp/first100 -r 0-99 --max-time 60 "$URL" | head -20
+          echo "bytes received: $(wc -c < /tmp/first100)"
+
+      - name: Download with retry + resume
+        run: |
+          set +e
+          start=$(date +%s)
+          curl -fsSL --retry 40 --retry-all-errors --retry-delay 3 \
+               -C - --max-time 1500 -o /tmp/master.json \
+               -w 'http=%{http_code} size=%{size_download} time=%{time_total}s speed=%{speed_download}B/s\n' "$URL"
+          echo "curl exit code: $?"
+          echo "elapsed: $(( $(date +%s) - start ))s"
+          ls -l /tmp/master.json
+
+      - name: Parse from disk - do the four tickers resolve?
         run: |
           python - <<'PY'
-          import json, sys
-          d = json.load(open("backend/app/data/instruments.json"))
-          t = d["tokens"]
-          print("equities:", len(t))
-          missing = [s for s in ("ADANIENSOL","BHARATFORG","LAURUSLABS","POWERINDIA","RELIANCE") if s not in t]
-          print("resolved:", {s: t[s] for s in ("ADANIENSOL","BHARATFORG","LAURUSLABS","POWERINDIA","RELIANCE") if s in t})
-          print("MISSING:", missing)
-          sys.exit(1 if missing else 0)
+          import ijson, sys
+          t = {}
+          with open("/tmp/master.json", "rb") as f:
+              for r in ijson.items(f, "item"):
+                  if r.get("exch_seg")=="NSE" and r.get("instrumenttype")=="" and r.get("symbol","").endswith("-EQ"):
+                      t[r["symbol"][:-3].upper()] = r["token"]
+          want = ("ADANIENSOL","BHARATFORG","LAURUSLABS","POWERINDIA","RELIANCE")
+          print("NSE equities:", len(t))
+          print("resolved:", {s: t[s] for s in want if s in t})
+          print("MISSING:", [s for s in want if s not in t])
+          sys.exit(1 if [s for s in want if s not in t] else 0)
           PY
