@@ -1,0 +1,29 @@
+# TEMPORARY - verifies the snapshot bake on a real runner. Deleted before merge.
+name: verify-instruments-tmp
+on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/verify-instruments-tmp.yml"]
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet httpx ijson
+      - name: Bake and measure
+        run: |
+          /usr/bin/time -v python backend/scripts/fetch_instruments.py 2>&1 | grep -E "instruments|Maximum resident|Elapsed" || true
+          ls -la backend/app/data/ || echo "NO DATA DIR"
+      - name: The four tickers from the alerts must resolve
+        run: |
+          python - <<'PY'
+          import json, sys
+          d = json.load(open("backend/app/data/instruments.json"))
+          t = d["tokens"]
+          print("equities:", len(t))
+          missing = [s for s in ("ADANIENSOL","BHARATFORG","LAURUSLABS","POWERINDIA","RELIANCE") if s not in t]
+          print("resolved:", {s: t[s] for s in ("ADANIENSOL","BHARATFORG","LAURUSLABS","POWERINDIA","RELIANCE") if s in t})
+          print("MISSING:", missing)
+          sys.exit(1 if missing else 0)
+          PY

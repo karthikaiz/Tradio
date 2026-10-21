@@ -25,7 +25,8 @@ COPY . .
 #
 # Non-fatal: a blip on the build host must not block a deploy, and the app
 # still has its (now streamed) runtime download to fall back on.
-RUN python scripts/fetch_instruments.py || true
+# Skipped when the deploy workflow already baked one into the build context.
+RUN [ -s app/data/instruments.json ] || python scripts/fetch_instruments.py || true
 
 # Single worker — the workload is I/O-bound and the machine has 256MB RAM
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
