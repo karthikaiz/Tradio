@@ -138,9 +138,18 @@ def test_loop_lock_returns_the_same_lock_within_one_loop():
 
 
 async def test_instruments_lock_is_reusable_across_loops():
-    """instruments._lock is a module-level singleton shared by every test."""
+    """instruments._lock is a module-level singleton shared by every test, and
+    pytest-asyncio gives each test its own event loop. A plain asyncio.Lock
+    binds to the first loop that awaits it and raises RuntimeError on any
+    other; LoopLock rebinds. Exercised through the real path that takes it."""
+    from unittest.mock import AsyncMock, MagicMock, patch
     from app.services import instruments
-    with patch.object(instruments, "_load", new_callable=AsyncMock):
-        instruments._token_map.clear()
-        await instruments._ensure_loaded()
-    assert True   # a poisoned lock would have raised RuntimeError above
+
+    client = MagicMock()
+    client.searchScrip = lambda exchange, query: {"status": True, "data": []}
+    session = MagicMock()
+    session.client = AsyncMock(return_value=client)
+
+    with patch.object(instruments, "angel_session", session):
+        await instruments.get_tokens_batch(["LOCKCHECK"], max_wait=1)
+    instruments._not_found.pop("LOCKCHECK", None)   # a poisoned lock would have raised above

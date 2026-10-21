@@ -23,28 +23,6 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-      # Bake Angel's instruments master into the image as a ~41KB snapshot.
-      #
-      # The raw master is ~25MB and parses to ~98MB, which the 256MB machine
-      # cannot be trusted to download on a cold start. Doing it here means a
-      # price request resolves symbols from a tiny file with no network at all.
-      #
-      # It is done on this runner rather than inside the Docker build because
-      # this is the one place whose network access can be checked in CI; the
-      # remote builder's cannot, and a failure there is silent.
-      #
-      # Non-fatal by design: the app still has its streamed runtime download,
-      # and a blip here must not block a deploy.
-      - name: Bake instruments snapshot
-        run: |
-          pip install --quiet httpx ijson
-          python backend/scripts/fetch_instruments.py
-          if [ -s backend/app/data/instruments.json ]; then
-            echo "snapshot: $(wc -c < backend/app/data/instruments.json) bytes"
-          else
-            echo "::warning title=No instruments snapshot::Download failed - the image will rely on the runtime load"
-          fi
-
       # --ha=false is IMPORTANT: without it Fly creates 2 machines for high
       # availability, which doubles the bill. One 256MB machine only.
       - name: Deploy to Fly.io

@@ -234,23 +234,23 @@ async def test_batch_reports_ticker_missing_from_response():
 
 
 async def test_batch_flags_unknown_symbol_without_calling_angel():
-    """A symbol genuinely absent from a LOADED master.
+    """A symbol Angel says does not exist is reported as exactly that.
 
-    instruments_ready is patched true on purpose: the same empty token_map
-    means something completely different when the master has not loaded yet,
-    and that case is covered by test_a_slow_token_load_cannot_eat_the_deadline.
+    "Not found" and "could not look it up" are different faults and used to be
+    reported with the same words.
     """
     from app.services.market import get_prices_batch
     client = make_batch_client([])
     with patch("app.services.market.get_tokens_batch", new_callable=AsyncMock,
                return_value={}), \
-         patch("app.services.market.instruments_ready", lambda: True), \
+         patch("app.services.market.resolution_failure",
+               lambda t: "Symbol not found on NSE"), \
          patch("app.services.market.angel_session") as sess:
         sess.client = AsyncMock(return_value=client)
         prices, errors = await get_prices_batch(["NOSUCHTICKER"])
 
     assert prices == {}
-    assert errors["NOSUCHTICKER"] == "Symbol not found in instruments master"
+    assert errors["NOSUCHTICKER"] == "Symbol not found on NSE"
     client.getMarketData.assert_not_called()
 
 
@@ -299,8 +299,7 @@ async def test_no_stage_can_outlive_the_deadline_however_it_is_configured():
          patch.object(market, "_TOKEN_WAIT_S", 999.0), \
          patch.object(market, "_RETRY_DELAY_S", 999.0), \
          patch.object(market, "angel_session", slow_session), \
-         patch.object(market, "get_tokens_batch", AsyncMock(return_value={"X": "1"})), \
-         patch.object(market, "instruments_ready", lambda: True):
+         patch.object(market, "get_tokens_batch", AsyncMock(return_value={"X": "1"})):
         started = time.monotonic()
         prices, errors = await market.get_prices_batch(["X"], budget_s=1.0)
         elapsed = time.monotonic() - started
@@ -313,48 +312,43 @@ async def test_no_stage_can_outlive_the_deadline_however_it_is_configured():
     assert "X" in errors
 
 
-async def test_a_slow_token_load_cannot_eat_the_deadline():
-    """The 15 Sep failure: a cold instruments load on the price path.
+async def test_a_slow_symbol_lookup_cannot_eat_the_deadline():
+    """The 15 Sep failure, in its current form: the token stage.
 
-    A deploy replaces the machine, so the /tmp snapshot is gone and the first
-    poll triggers a full scrip-master download bounded at 25s — on an 18s
-    deadline, inside no timeout at all. Every poll after a deploy therefore
-    exceeded the deadline and reported "Upstream quote exceeded the 18s
-    server deadline" for every ticker at once.
+    It used to be a full scrip-master download inside the request, bounded at
+    25s on an 18s deadline and inside no timeout at all. Resolution is now a
+    live lookup that is almost always unnecessary, but whatever the token
+    stage does, it gets only the slice of the budget it was handed.
     """
     from app.services import market
 
     async def _slow_tokens(symbols, max_wait=None):
-        # Honours max_wait the way the real one does: bounded wait, and the
-        # download survives it.
         await asyncio.sleep(min(max_wait if max_wait is not None else 30, 30))
         return {}
 
     with patch.object(market, "get_tokens_batch", _slow_tokens), \
          patch.object(market, "_TOKEN_WAIT_S", 0.2), \
-         patch.object(market, "instruments_ready", lambda: False):
+         patch.object(market, "resolution_failure",
+                      lambda t: "Symbol lookup unavailable: timed out"):
         started = time.monotonic()
         prices, errors = await market.get_prices_batch(["ADANIENSOL"], budget_s=5.0)
         elapsed = time.monotonic() - started
 
     assert elapsed < 2.0, f"token stage ran {elapsed:.1f}s, ignoring its cap"
-    # And it must say it was still loading, not that the ticker is unknown.
-    assert "Instruments master unavailable" in errors["ADANIENSOL"], errors
+    # It says the lookup failed. It must not claim the master is "still loading".
+    assert "lookup unavailable" in errors["ADANIENSOL"], errors
+    assert "still loading" not in errors["ADANIENSOL"]
 
 
-def test_the_token_wait_is_smaller_than_the_load_it_waits_on():
-    """Sanity on the two constants, stated where both are visible.
-
-    _LOAD_TIMEOUT_S is deliberately LONGER than the caller's wait — the load
-    is a background task that outlives any one request. That is only safe
-    because the caller no longer owns it; if a caller awaited the load
-    directly, a 30s poll would cancel and restart it forever.
-    """
+def test_one_symbol_lookup_fits_inside_the_slice_the_price_path_gives_it():
+    """Both constants, stated where both are visible. A single searchScrip
+    call must be able to finish inside the token stage's budget, and that
+    budget must be a fraction of the whole endpoint's."""
     from app.services import market
     from app.services import instruments
 
     assert market._TOKEN_WAIT_S < market.BATCH_DEADLINE_S
-    assert market._TOKEN_WAIT_S < instruments._LOAD_TIMEOUT_S
+    assert instruments._RESOLVE_CALL_TIMEOUT_S <= market._TOKEN_WAIT_S
 
 
 def test_the_deadline_still_lands_before_the_client_gives_up():
